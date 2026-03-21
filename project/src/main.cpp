@@ -18,6 +18,41 @@
 #include <filesystem>
 #include <thread>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+
+static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* ep) {
+    FILE* f = fopen("saintsrow_crash.log", "a");
+    if (f) {
+        fprintf(f, "\n=== CRASH ===\n");
+        fprintf(f, "Exception code: 0x%08lX\n", ep->ExceptionRecord->ExceptionCode);
+        fprintf(f, "Exception addr: 0x%p\n", ep->ExceptionRecord->ExceptionAddress);
+        fprintf(f, "RIP: 0x%016llX\n", ep->ContextRecord->Rip);
+        fprintf(f, "RSP: 0x%016llX\n", ep->ContextRecord->Rsp);
+        fprintf(f, "RAX: 0x%016llX\n", ep->ContextRecord->Rax);
+        fprintf(f, "RCX: 0x%016llX\n", ep->ContextRecord->Rcx);
+        fprintf(f, "RDX: 0x%016llX\n", ep->ContextRecord->Rdx);
+        fprintf(f, "R8:  0x%016llX\n", ep->ContextRecord->R8);
+
+        // Stack trace
+        void* stack[64];
+        WORD frames = CaptureStackBackTrace(0, 64, stack, NULL);
+        fprintf(f, "\nStack trace (%d frames):\n", frames);
+        for (WORD i = 0; i < frames; i++) {
+            fprintf(f, "  [%d] 0x%p\n", i, stack[i]);
+        }
+        fclose(f);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static struct VEHInstaller_ {
+    VEHInstaller_() { AddVectoredExceptionHandler(1, CrashHandler); }
+} veh_installer_;
+#endif
+
 class SaintsRowApp : public rex::ui::WindowedApp, public rex::ui::WindowListener {
 public:
     static std::unique_ptr<rex::ui::WindowedApp> Create(rex::ui::WindowedAppContext& ctx) {

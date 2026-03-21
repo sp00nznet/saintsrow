@@ -19,6 +19,9 @@ set(SAINTSROW_SOURCES
     src/main.cpp
 )
 
+# Rex app implementation (graphics, audio, overlay setup)
+list(APPEND SAINTSROW_SOURCES ${REXGLUE_SHARE_DIR}/rex_app.cpp)
+
 # Platform-specific entry point
 if(WIN32)
     list(APPEND SAINTSROW_SOURCES ${REXGLUE_SHARE_DIR}/windowed_app_main_win.cpp)
