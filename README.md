@@ -58,11 +58,15 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Find ABI helper addresses (8/10 found, no setjmp/longjmp)
 - [x] Analyze kernel imports (266 kernel + 204 XAM)
 - [x] Run XenonRecomp first pass (33,725 functions -> 122 MB C++)
-- [ ] Resolve unrecognized instructions (vandc, mulhdu, frsqrte)
-- [ ] Add missing switch table entries (~30 tables)
-- [ ] Create project scaffold (CMake + ReXGlue SDK)
-- [ ] First compilation
-- [ ] First boot
+- [x] Resolve unrecognized instructions (vandc, mulhdu, frsqrte, dcbst)
+- [x] Create project scaffold (CMake + ReXGlue SDK v0.7.0)
+- [x] First compilation (45 MB native x86-64 executable)
+- [x] First boot -- game entry point executes, loads all packfiles
+- [x] D3D12 GPU initialization (NVIDIA RTX 5070, ROV, tier 3)
+- [x] Audio system (XMA decoder + SDL audio)
+- [x] Game creates 14+ worker threads (physics, streaming, etc.)
+- [ ] Fix worker thread crash (null pointer in CRT at offset 0x58)
+- [ ] Game-specific kernel stubs (user profile, content, etc.)
 - [ ] Menu navigation
 - [ ] In-game rendering
 - [ ] Gameplay
