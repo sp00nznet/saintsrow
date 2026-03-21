@@ -1,0 +1,40 @@
+# Build artifacts
+build/
+out/
+*.o
+*.obj
+*.exe
+*.pdb
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.user
+CMakeUserPresets.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Game files (don't commit binaries)
+*.xex
+*.xex2
+*.bin
+*.iso
+*.god
+pe_image.bin
+
+# Extracted game data
+extracted/
+
+# Generated files from XenonRecomp (very large)
+generated/
+ppc/
+
+# ReXGlue SDK (cloned separately)
+thirdparty/
+
+# Claude
+.claude/
