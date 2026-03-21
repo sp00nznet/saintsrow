@@ -10,6 +10,12 @@
 #include <rex/logging.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xthread.h>
+#include <rex/kernel/init.h>
+#if REX_HAS_D3D12
+#include <rex/graphics/d3d12/graphics_system.h>
+#endif
+#include <rex/audio/sdl/sdl_audio_system.h>
+#include <rex/input/input_system.h>
 #include <rex/ui/window.h>
 #include <rex/ui/window_listener.h>
 #include <rex/ui/windowed_app.h>
@@ -54,16 +60,25 @@ public:
         REXLOG_INFO("Saints Row starting");
         REXLOG_INFO("  Game directory: {}", game_dir.string());
 
-        // Create and initialize runtime
+        // Create and initialize runtime with full backend config
         runtime_ = std::make_unique<rex::Runtime>(game_dir);
         runtime_->set_app_context(&app_context());
+
+        rex::RuntimeConfig config;
+#if REX_HAS_D3D12
+        config.graphics = REX_GRAPHICS_BACKEND(rex::graphics::d3d12::D3D12GraphicsSystem);
+#endif
+        config.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
+        config.input_factory = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
+        config.kernel_init = rex::kernel::InitializeKernel;
 
         auto status = runtime_->Setup(
             static_cast<uint32_t>(PPC_CODE_BASE),
             static_cast<uint32_t>(PPC_CODE_SIZE),
             static_cast<uint32_t>(PPC_IMAGE_BASE),
             static_cast<uint32_t>(PPC_IMAGE_SIZE),
-            PPCFuncMappings);
+            PPCFuncMappings,
+            std::move(config));
         if (XFAILED(status)) {
             REXLOG_ERROR("Runtime setup failed: {:08X}", status);
             return false;
