@@ -53,13 +53,14 @@ Native x86-64 .exe          -- Saints Row on PC
 ## Progress
 
 - [x] Acquire game ISO
-- [ ] Extract ISO contents
-- [ ] Extract and analyze XEX2 binary
-- [ ] Find ABI helper addresses
-- [ ] Extract switch tables
-- [ ] Analyze kernel imports
-- [ ] Run XenonRecomp (generate C++)
-- [ ] Create project scaffold
+- [x] Extract ISO contents (375 files from XGD2 disc)
+- [x] Extract and analyze XEX2 binary (33.4 MB PE, 12 sections, Bink middleware)
+- [x] Find ABI helper addresses (8/10 found, no setjmp/longjmp)
+- [x] Analyze kernel imports (266 kernel + 204 XAM)
+- [x] Run XenonRecomp first pass (33,725 functions -> 122 MB C++)
+- [ ] Resolve unrecognized instructions (vandc, mulhdu, frsqrte)
+- [ ] Add missing switch table entries (~30 tables)
+- [ ] Create project scaffold (CMake + ReXGlue SDK)
 - [ ] First compilation
 - [ ] First boot
 - [ ] Menu navigation
