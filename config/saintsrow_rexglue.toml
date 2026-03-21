@@ -1,0 +1,26 @@
+# Saints Row (Xbox 360, 2006) - ReXGlue Codegen Configuration
+
+project_name = "saintsrow"
+file_path = "../extracted/default.xex"
+out_directory_path = "../generated"
+
+# ABI Register Save/Restore Addresses
+savegprlr_14_address = 0x82702850
+restgprlr_14_address = 0x827028A0
+savefpr_14_address = 0x82702F10
+restfpr_14_address = 0x82702F5C
+savevmx_14_address = 0x8275B150
+restvmx_14_address = 0x8275B3E8
+savevmx_64_address = 0x8275B1E4
+restvmx_64_address = 0x8275B47C
+
+# setjmp/longjmp not found
+# setjmp_address = 0x00000000
+# longjmp_address = 0x00000000
+
+[functions]
+# Manual function definitions for unresolved branch targets
+# 0x82608CC0: small function (li r11,4; li r10,10; li r3,0; stb; sth; blr)
+0x82608CC0 = { name = "sub_82608CC0" }
+# 0x826090D8: function called by branch from 0x82609D9C
+0x826090D8 = { name = "sub_826090D8" }
