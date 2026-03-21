@@ -1,0 +1,36 @@
+# Saints Row (Xbox 360, 2006) - XenonRecomp Configuration
+# Static recompilation: PowerPC -> C++
+
+[main]
+file_path = "../extracted/default.xex"
+out_directory_path = "../ppc"
+# switch_table_file_path = "saintsrow_switch_tables.toml"
+
+# ABI Register Save/Restore Addresses
+# Found by find_abi_addrs.py on the PE image
+savegprlr_14_address = 0x82702850
+restgprlr_14_address = 0x827028A0
+savefpr_14_address = 0x82702F10
+restfpr_14_address = 0x82702F5C
+savevmx_14_address = 0x8275B150
+restvmx_14_address = 0x8275B3E8
+savevmx_64_address = 0x8275B1E4
+restvmx_64_address = 0x8275B47C
+
+# setjmp/longjmp not found (game doesn't use them)
+# setjmp_address = 0x00000000
+# longjmp_address = 0x00000000
+
+# Manual function definitions (add as needed to fix boundary errors)
+# functions = []
+
+[optimizations]
+# All optimizations DISABLED for initial recompilation pass
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
