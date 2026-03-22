@@ -45,31 +45,44 @@ extern "C" void XamUserGetSigninInfo_entry(
 // Override the Bink worker to be a no-op that just waits for shutdown.
 // This skips intro videos but prevents the crash.
 
-// Override sub_8278D148 - Bink decode worker thread
-// The Bink worker receives a context struct in r3 with:
-//   +0x00: state flag (0=idle, 1=running, checked by main thread)
-//   +0x04: parameter 1
-//   +0x08: semaphore/event to wait on
-//   +0x14: event to signal when done
-// We need to keep the thread alive and looping, not exit immediately,
-// because the main thread expects to communicate with it via shared state.
+// Bink video decode is disabled - these functions all live in the BINK code
+// section (0x82789600-0x82799724). We stub the key entry points that the
+// game calls to initialize and decode Bink videos.
+
+// Stub ALL Bink video section functions to return 0.
+// The entire BINK section (0x82789600-0x82799724) is RAD Game Tools
+// Bink video middleware. We disable it completely to avoid GPU thread
+// crashes from Bink's Xbox 360-specific hardware video decode.
+// The game skips video playback when Bink functions return null/0.
+#define BINK_STUB(addr) PPC_FUNC(sub_##addr) { ctx.r3.u64 = 0; }
+BINK_STUB(82789600)
+BINK_STUB(82789658)
+BINK_STUB(827896F0)
+BINK_STUB(8278AF80)
+BINK_STUB(8278AFE0)
+BINK_STUB(8278B210)
+BINK_STUB(8278B380)
+BINK_STUB(8278B410)
+BINK_STUB(8278B4A0)
+BINK_STUB(8278B660)
+BINK_STUB(8278B680)
+BINK_STUB(8278BC20)
+BINK_STUB(8278BDE0)
+BINK_STUB(8278BF58)
+BINK_STUB(8278C240)
+
+// Bink worker thread - keep alive but idle
 PPC_FUNC(sub_8278D148) {
-    static int bink_stub_count = 0;
-    if (++bink_stub_count <= 2) {
-        fprintf(stderr, "[STUB] Bink worker thread started (PPC 0x8278D148) -- idle loop\n");
-    }
-    // Set state to 0 (idle/done) so the main thread doesn't wait forever
     uint32_t context_ptr = ctx.r3.u32;
     if (context_ptr) {
         PPC_STORE_U32(context_ptr + 0, 0);  // state = idle
     }
-    // Sleep indefinitely - the thread stays alive but does nothing
-    // The main thread will check the state flag and see it's idle
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     ctx.r3.u64 = 0;
 }
+#undef BINK_STUB
 
 // ============================================================================
 // Content / License Stubs
