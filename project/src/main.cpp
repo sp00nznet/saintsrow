@@ -26,21 +26,87 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
 
 // Null-page access handler: intercepts null pointer dereferences in recompiled
 // code and zeros the destination register instead of crashing. This handles
 // cases where the game accesses uninitialized pointers (GPU device, user
 // profile, etc.) that would be valid on real hardware.
 static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
+    // (debug via file since WIN32 app has no console)
+
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
     auto fault_addr = ep->ExceptionRecord->ExceptionInformation[1];
 
-    // Only handle null page accesses (addresses 0x0 - 0xFFFF)
+    // Log ALL access violations to a crash log (append mode)
+    {
+        static int total_av = 0;
+        if (++total_av <= 100) {
+            FILE* cf = fopen("saintsrow_all_crashes.log", "a");
+            if (cf) {
+                HMODULE hm = NULL;
+                char mn[MAX_PATH] = "unknown";
+                if (GetModuleHandleExA(6, (LPCSTR)ep->ContextRecord->Rip, &hm))
+                    GetModuleFileNameA(hm, mn, MAX_PATH);
+                uint8_t* ip = (uint8_t*)ep->ContextRecord->Rip;
+                fprintf(cf, "[AV#%d] addr=0x%llX RIP=0x%llX TID=%lu mod=%s bytes=%02X%02X%02X%02X%02X%02X\n",
+                    total_av, (unsigned long long)fault_addr,
+                    (unsigned long long)ep->ContextRecord->Rip,
+                    GetCurrentThreadId(), mn,
+                    ip[0], ip[1], ip[2], ip[3], ip[4], ip[5]);
+                fclose(cf);
+            }
+        }
+    }
+
+    // Handle null page accesses (addresses 0x0 - 0xFFFF)
+    // Also handle the specific MSVCP140 _Thrd_abort crash at addr 0x58
     if (fault_addr >= 0x10000) {
         return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    // Check if crash is in MSVCP140's _Thrd_abort (offset 0x123D2)
+    // This happens when a thread wait operation uses a destroyed sync object
+    HMODULE hMod = NULL;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCSTR)ep->ContextRecord->Rip, &hMod)) {
+        char modName[MAX_PATH] = {0};
+        GetModuleFileNameA(hMod, modName, MAX_PATH);
+        if (strstr(modName, "MSVCP140") || strstr(modName, "msvcp140")) {
+            // This is a CRT crash from a destroyed/null sync object
+            // Skip the wait and return 0 (timeout) to the caller
+            static int crt_crash_count = 0;
+            if (++crt_crash_count <= 50) {
+                FILE* wf = fopen("saintsrow_all_crashes.log", "a");
+                if (wf) {
+                    fprintf(wf, "[MSVCP140-BYPASS] offset=0x%llX fault=0x%llX -- skipping\n",
+                        (unsigned long long)(ep->ContextRecord->Rip - (uint64_t)hMod),
+                        (unsigned long long)fault_addr);
+                    fclose(wf);
+                }
+            }
+            // Unwind the call stack to return from _Thrd_abort to its caller
+            // _Thrd_abort is a __cdecl function, RSP points to the stack
+            // We need to find the return address and restore RSP
+            // The function prologue saves RBX, RBP, RDI, RSI, R12
+            // Simplest: walk the stack and return to the highest frame in our exe
+            //
+            // Actually, just set the thread to terminate cleanly rather than
+            // crash in the CRT. Use longjmp-style recovery:
+            // Set RAX to error code and jump to the function epilogue
+            //
+            // For now, terminate just this thread instead of the whole process
+            ep->ContextRecord->Rip = (uint64_t)&ExitThread;
+            ep->ContextRecord->Rcx = 0;  // Exit code 0
+            // Fix stack alignment for the call
+            ep->ContextRecord->Rsp &= ~0xF;
+            ep->ContextRecord->Rsp -= 8;  // Shadow space
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
     }
 
     // Decode x86-64 instruction at RIP to figure out the destination register
@@ -56,9 +122,23 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         rex = rip[i++];
     }
 
-    if (rip[i] == 0x8B || rip[i] == 0x0FB6 || rip[i] == 0x0FB7 ||
+    // Debug instruction decode to file (WIN32 has no console)
+    {
+        static int dbg_cnt = 0;
+        if (++dbg_cnt <= 20) {
+            FILE* df = fopen("saintsrow_all_crashes.log", "a");
+            if (df) {
+                fprintf(df, "[VEH-DECODE] fault=0x%llX i=%d rex=0x%X opcode=0x%02X bytes=%02X%02X%02X%02X\n",
+                    (unsigned long long)fault_addr, i, rex, rip[i], rip[0], rip[1], rip[2], rip[3]);
+                fclose(df);
+            }
+        }
+    }
+
+    if (rip[i] == 0x8B || rip[i] == 0x0FB6 || rip[i] == 0x0FB7 || rip[i] == 0x63 ||
+        rip[i] == 0x3B || rip[i] == 0x39 || rip[i] == 0x85 ||
         (rip[i] == 0x0F && (rip[i+1] == 0xB6 || rip[i+1] == 0xB7 || rip[i+1] == 0xBE || rip[i+1] == 0xBF))) {
-        // It's a MOV/MOVZX/MOVSX - zero the destination register
+        // It's a MOV/MOVZX/MOVSX/MOVSXD/CMP/TEST - zero dest and skip
         // Find dest register from ModRM byte
         int oplen = (rip[i] == 0x0F) ? 2 : 1;
         uint8_t modrm = rip[i + oplen];
@@ -71,8 +151,12 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         // But the register encoding is different... simplify: just zero RAX and advance
         static int null_count = 0;
         if (++null_count <= 50) {
-            fprintf(stderr, "[NULL] Access to 0x%llX at RIP=0x%llX -- zeroing dest, continuing\n",
-                (unsigned long long)fault_addr, (unsigned long long)ep->ContextRecord->Rip);
+            FILE* nf = fopen("saintsrow_all_crashes.log", "a");
+            if (nf) {
+                fprintf(nf, "[NULL-HANDLED] addr=0x%llX RIP=0x%llX -- zeroed dest\n",
+                    (unsigned long long)fault_addr, (unsigned long long)ep->ContextRecord->Rip);
+                fclose(nf);
+            }
         }
 
         // Zero the most likely destination (RAX is used for return values)
@@ -92,12 +176,24 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         return EXCEPTION_CONTINUE_EXECUTION;
     }
 
-    // Log the full crash info including thread ID
+    // Log the full crash info including thread ID and module name
     FILE* f = fopen("saintsrow_crash.log", "w");
     if (f) {
         fprintf(f, "NULL PAGE FAULT: addr=0x%llX RIP=0x%llX TID=%lu\n",
             (unsigned long long)fault_addr, (unsigned long long)ep->ContextRecord->Rip,
             GetCurrentThreadId());
+        // Find which module the crash is in
+        HMODULE hMod = NULL;
+        char modName[MAX_PATH] = {0};
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)ep->ContextRecord->Rip, &hMod)) {
+            GetModuleFileNameA(hMod, modName, MAX_PATH);
+            MODULEINFO mi = {};
+            GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi));
+            fprintf(f, "Module: %s (base=0x%p size=0x%X)\n", modName, mi.lpBaseOfDll, mi.SizeOfImage);
+            fprintf(f, "Offset in module: 0x%llX\n",
+                (unsigned long long)ep->ContextRecord->Rip - (unsigned long long)mi.lpBaseOfDll);
+        }
         fprintf(f, "Instruction bytes: %02X %02X %02X %02X %02X %02X %02X %02X\n",
             rip[0], rip[1], rip[2], rip[3], rip[4], rip[5], rip[6], rip[7]);
         fprintf(f, "RAX=0x%016llX RCX=0x%016llX RDX=0x%016llX\n",
@@ -115,7 +211,7 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
-static struct VEH_ { VEH_() { AddVectoredExceptionHandler(0, NullPageHandler); } } veh_;
+// VEH registered in OnInitialize after SDK setup
 #endif
 
 class SaintsRowApp : public rex::ui::WindowedApp, public rex::ui::WindowListener {
@@ -211,6 +307,11 @@ public:
         }
         REXLOG_INFO("XEX image loaded successfully!");
         spdlog::default_logger()->flush();
+
+        // Register null page handler AFTER SDK initialization
+        // (must come after SDK's MMIO handler to avoid conflicts)
+        AddVectoredExceptionHandler(1, NullPageHandler);
+        REXLOG_INFO("Null page handler registered");
 
         REXLOG_INFO("XEX fully loaded. Attempting window creation...");
         spdlog::default_logger()->flush();

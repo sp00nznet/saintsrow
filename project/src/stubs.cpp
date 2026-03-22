@@ -10,6 +10,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <chrono>
+#include <thread>
 
 // ============================================================================
 // XAM User / Profile Stubs
@@ -44,14 +46,28 @@ extern "C" void XamUserGetSigninInfo_entry(
 // This skips intro videos but prevents the crash.
 
 // Override sub_8278D148 - Bink decode worker thread
+// The Bink worker receives a context struct in r3 with:
+//   +0x00: state flag (0=idle, 1=running, checked by main thread)
+//   +0x04: parameter 1
+//   +0x08: semaphore/event to wait on
+//   +0x14: event to signal when done
+// We need to keep the thread alive and looping, not exit immediately,
+// because the main thread expects to communicate with it via shared state.
 PPC_FUNC(sub_8278D148) {
     static int bink_stub_count = 0;
     if (++bink_stub_count <= 2) {
-        fprintf(stderr, "[STUB] Bink worker thread started (PPC 0x8278D148) -- stubbed\n");
+        fprintf(stderr, "[STUB] Bink worker thread started (PPC 0x8278D148) -- idle loop\n");
     }
-    // The thread context is in r3 (ctx.r3.u32)
-    // Field at offset 0: state flag (1 = running)
-    // Just return immediately - the game will handle Bink not completing
+    // Set state to 0 (idle/done) so the main thread doesn't wait forever
+    uint32_t context_ptr = ctx.r3.u32;
+    if (context_ptr) {
+        PPC_STORE_U32(context_ptr + 0, 0);  // state = idle
+    }
+    // Sleep indefinitely - the thread stays alive but does nothing
+    // The main thread will check the state flag and see it's idle
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
     ctx.r3.u64 = 0;
 }
 
