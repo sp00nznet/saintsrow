@@ -222,7 +222,19 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
             &ep->ContextRecord->R12, &ep->ContextRecord->R13,
             &ep->ContextRecord->R14, &ep->ContextRecord->R15,
         };
+        static const char* reg_names[] = {"rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi",
+            "r8","r9","r10","r11","r12","r13","r14","r15"};
         if (reg_idx < 16 && reg_idx != 4) {  // Don't zero RSP!
+            FILE* rf = fopen("saintsrow_all_crashes.log", "a");
+            if (rf) {
+                // Log which register holds the base address (from ModRM rm field)
+                int rm = modrm & 7;
+                if (rex & 0x01) rm += 8;  // REX.B
+                fprintf(rf, "[NULL-DETAIL] dest=%s base_reg=%s base_val=0x%llX\n",
+                    reg_names[reg_idx], rm < 16 ? reg_names[rm] : "?",
+                    rm < 16 ? *ctx_regs[rm] : 0ULL);
+                fclose(rf);
+            }
             *ctx_regs[reg_idx] = 0;
         } else {
             ep->ContextRecord->Rax = 0;

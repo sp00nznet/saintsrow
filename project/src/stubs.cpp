@@ -85,6 +85,46 @@ PPC_FUNC(sub_8278D148) {
 #undef BINK_STUB
 
 // ============================================================================
+// Render subsystem init debug hook
+// ============================================================================
+extern "C" void __imp__sub_82653F98(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827166C0(PPCContext& ctx, uint8_t* base);
+
+// Hook sub_827166C0 -- reads TLS r13+256 -> [+332] to get GPU/render context
+PPC_FUNC(sub_827166C0) {
+    __imp__sub_827166C0(ctx, base);
+    static int tls_log_count = 0;
+    if (++tls_log_count <= 10) {
+        FILE* tf = fopen("saintsrow_render_debug.log", "a");
+        if (tf) {
+            fprintf(tf, "sub_827166C0: r13=0x%08X, TLS[256]=0x%08X, result r3=0x%08X\n",
+                ctx.r13.u32,
+                (ctx.r13.u32 ? PPC_LOAD_U32(ctx.r13.u32 + 256) : 0),
+                ctx.r3.u32);
+            fclose(tf);
+        }
+    }
+}
+
+// sub_82653F98 is the function where the null dereference occurs.
+// It receives arguments in r3-r10 and accesses fields from objects.
+// Hook it to log the arguments and identify which is null.
+// Stub sub_82653F98 as a no-op to skip the render subsystem init that crashes
+// This lets the game continue past the null pointer and reach its main loop
+PPC_FUNC(sub_82653F98) {
+    static int skip_count = 0;
+    if (++skip_count <= 3) {
+        FILE* df = fopen("saintsrow_render_debug.log", "a");
+        if (df) {
+            fprintf(df, "sub_82653F98 SKIPPED (#%d) -- render subsystem init stubbed\n", skip_count);
+            fclose(df);
+        }
+    }
+    // Don't call the original -- just return
+    // The caller (sub_82648ED8) will continue with the next function
+}
+
+// ============================================================================
 // Content / License Stubs
 // ============================================================================
 
