@@ -217,7 +217,37 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
     else {
-        return EXCEPTION_CONTINUE_SEARCH;
+        // Check if the faulting instruction is a CALL (FF /2) - if so, the
+        // fault is from jumping to an invalid function pointer. Simulate ret.
+        uint8_t* call_ip = (uint8_t*)ep->ContextRecord->Rip;
+        int ci = 0;
+        if ((call_ip[ci] & 0xF0) == 0x40) ci++;  // REX prefix
+        if (call_ip[ci] == 0xFF) {
+            uint8_t modrm = call_ip[ci + 1];
+            int reg_field = (modrm >> 3) & 7;
+            if (reg_field == 2 || reg_field == 3) {  // CALL or CALLF
+                // Simulate ret: pop return address, set RAX=0
+                uint64_t* rsp = (uint64_t*)ep->ContextRecord->Rsp;
+                ep->ContextRecord->Rip = *rsp;
+                ep->ContextRecord->Rsp += 8;
+                ep->ContextRecord->Rax = 0;
+                static int bad_call_count = 0;
+                if (++bad_call_count <= 20) {
+                    FILE* bf = fopen("saintsrow_all_crashes.log", "a");
+                    if (bf) {
+                        fprintf(bf, "[BAD-CALL] call through 0x%llX at RIP=0x%llX, returning to 0x%llX\n",
+                            (unsigned long long)fault_addr,
+                            (unsigned long long)ep->ContextRecord->Rip,
+                            (unsigned long long)*rsp);
+                        fclose(bf);
+                    }
+                }
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+        }
+        // For non-call AVs at unknown addresses, try to skip the instruction
+        // by zeroing the dest register (same as null page handler)
+        // Fall through to the instruction decoder below
     }
 
     // Check if crash is in MSVCP140's _Thrd_abort (offset 0x123D2)

@@ -56,7 +56,9 @@ extern "C" void XamUserGetSigninInfo_entry(
 // The game skips video playback when Bink functions return null/0.
 #define BINK_STUB(addr) PPC_FUNC(sub_##addr) { ctx.r3.u64 = 0; }
 BINK_STUB(82789600)
-BINK_STUB(82789658)
+// sub_82789658 = BinkWait: return 1 = "video done / ready for next frame"
+// Returning 0 causes infinite spin in the video playback loop
+PPC_FUNC(sub_82789658) { ctx.r3.u64 = 1; }
 BINK_STUB(827896F0)
 BINK_STUB(8278AF80)
 BINK_STUB(8278AFE0)
@@ -70,6 +72,11 @@ BINK_STUB(8278BC20)
 BINK_STUB(8278BDE0)
 BINK_STUB(8278BF58)
 BINK_STUB(8278C240)
+
+// sub_821FBD10 is the video playback driver function.
+// With Bink stubbed, this function enters an infinite loop traversing
+// an uninitialized linked list. Skip it entirely.
+PPC_FUNC(sub_821FBD10) { ctx.r3.u64 = 0; }
 
 // Bink worker thread - keep alive but idle
 PPC_FUNC(sub_8278D148) {
@@ -106,12 +113,29 @@ PPC_FUNC(sub_827166C0) {
     }
 }
 
-// sub_82653F98 is the function where the null dereference occurs.
-// It receives arguments in r3-r10 and accesses fields from objects.
-// Hook it to log the arguments and identify which is null.
-// Let sub_82653F98 run normally -- the null page handler with null object
-// pool should prevent the cascading crashes
-// PPC_FUNC(sub_82653F98) { ... }
+// Heartbeat hooks on suspected game loop functions
+extern "C" void __imp__sub_82648ED8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82186F08(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82648ED8) {
+    static int count = 0;
+    count++;
+    if (count <= 5 || (count % 100 == 0)) {
+        FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+        if (hf) { fprintf(hf, "[TICK-648ED8] #%d r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
+    }
+    __imp__sub_82648ED8(ctx, base);
+}
+
+PPC_FUNC(sub_82186F08) {
+    static int count = 0;
+    count++;
+    if (count <= 10 || (count % 100 == 0)) {
+        FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+        if (hf) { fprintf(hf, "[LOOP-186F08] #%d r3=0x%08X r4=0x%08X\n", count, ctx.r3.u32, ctx.r4.u32); fclose(hf); }
+    }
+    __imp__sub_82186F08(ctx, base);
+}
 
 // ============================================================================
 // Content / License Stubs
