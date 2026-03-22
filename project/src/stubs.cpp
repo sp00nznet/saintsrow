@@ -139,6 +139,74 @@ PPC_FUNC(sub_82186F08) {
 
 
 // ============================================================================
+// Critical Section tracing
+// ============================================================================
+extern "C" void __imp__RtlEnterCriticalSection(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__RtlLeaveCriticalSection(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82788704) {  // RtlEnterCriticalSection
+    static int ec = 0;
+    uint32_t cs_addr = ctx.r3.u32;
+    // Check lock_count before entering - if contended, log it
+    int32_t lock_count = (int32_t)PPC_LOAD_U32(cs_addr + 4);  // lock_count offset
+    uint32_t owner = PPC_LOAD_U32(cs_addr + 12);  // owning_thread offset
+    if (++ec <= 50 || lock_count >= 0) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "[CS-ENTER #%d] cs=0x%08X lock=%d owner=0x%08X\n",
+                ec, cs_addr, lock_count, owner);
+            fclose(f);
+        }
+    }
+    __imp__RtlEnterCriticalSection(ctx, base);
+}
+
+PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
+    static int lc = 0;
+    if (++lc <= 50) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "[CS-LEAVE #%d] cs=0x%08X\n", lc, ctx.r3.u32);
+            fclose(f);
+        }
+    }
+    __imp__RtlLeaveCriticalSection(ctx, base);
+}
+
+// Hook game init to trace progress
+extern "C" void __imp__sub_827176E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827176E0) {
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[GAME-INIT] entering sub_827176E0\n"); fclose(f); }
+    __imp__sub_827176E0(ctx, base);
+    f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[GAME-INIT] sub_827176E0 returned r3=0x%08X\n", ctx.r3.u32); fclose(f); }
+}
+
+// Hook xstart to trace the main game flow
+extern "C" void __imp__xstart(PPCContext& ctx, uint8_t* base);
+PPC_FUNC_IMPL(xstart) {
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[XSTART] entering\n"); fclose(f); }
+    __imp__xstart(ctx, base);
+    f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[XSTART] returned (game exited)\n"); fclose(f); }
+}
+
+// ============================================================================
+// Render wait thread - sub_825DF970
+// Original waits on a VSync event. Replace with simple idle loop so the
+// game thread isn't blocked waiting for this thread to process frames.
+// ============================================================================
+PPC_FUNC(sub_825DF970) {
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[RENDER-WAIT] stub: idling instead of event wait\n"); fclose(f); }
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+}
+
+// ============================================================================
 // Content / License Stubs
 // ============================================================================
 
