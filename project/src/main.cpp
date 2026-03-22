@@ -34,7 +34,58 @@
 // cases where the game accesses uninitialized pointers (GPU device, user
 // profile, etc.) that would be valid on real hardware.
 static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
-    // (debug via file since WIN32 app has no console)
+    // For null page faults, try to identify the PPC function
+    // by checking return addresses in the stack against the function mapping table
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        ep->ExceptionRecord->ExceptionInformation[1] < 0x10000) {
+        FILE* pf = fopen("saintsrow_ppc_crash.log", "a");
+        if (pf) {
+            // Walk the stack and try to find which generated sub_ function we're in
+            void* frames[32];
+            WORD nframes = CaptureStackBackTrace(0, 32, frames, NULL);
+            HMODULE exe = GetModuleHandleA(NULL);
+            MODULEINFO mi = {};
+            GetModuleInformation(GetCurrentProcess(), exe, &mi, sizeof(mi));
+            uint64_t exe_base = (uint64_t)mi.lpBaseOfDll;
+            uint64_t exe_end = exe_base + mi.SizeOfImage;
+
+            fprintf(pf, "=== NULL at 0x%llX, RIP=0x%llX ===\n",
+                (unsigned long long)ep->ExceptionRecord->ExceptionInformation[1],
+                (unsigned long long)ep->ContextRecord->Rip);
+            fprintf(pf, "EXE base=0x%llX size=0x%X\n", exe_base, mi.SizeOfImage);
+            fprintf(pf, "RIP offset in exe: 0x%llX\n",
+                (unsigned long long)(ep->ContextRecord->Rip - exe_base));
+
+            // Try to resolve PPC addresses by scanning PPCFuncMappings
+            // Each entry has {ppc_addr, host_func_ptr}
+            // Find the entry whose host pointer is closest to (but below) each frame
+            for (WORD fi = 0; fi < nframes && fi < 20; fi++) {
+                uint64_t addr = (uint64_t)frames[fi];
+                if (addr >= exe_base && addr < exe_end) {
+                    // Search function table for the best match
+                    uint32_t best_ppc = 0;
+                    uint64_t best_dist = UINT64_MAX;
+                    for (int j = 0; PPCFuncMappings[j].guest != 0; j++) {
+                        uint64_t fn = (uint64_t)PPCFuncMappings[j].host;
+                        if (fn <= addr && (addr - fn) < best_dist) {
+                            best_dist = addr - fn;
+                            best_ppc = (uint32_t)PPCFuncMappings[j].guest;
+                        }
+                    }
+                    if (best_ppc && best_dist < 0x100000) {
+                        fprintf(pf, "  frame[%d] exe+0x%llX -> PPC 0x%08X (+0x%llX)\n", fi,
+                            (unsigned long long)(addr - exe_base), best_ppc,
+                            (unsigned long long)best_dist);
+                    } else {
+                        fprintf(pf, "  frame[%d] exe+0x%llX (SDK/system)\n", fi,
+                            (unsigned long long)(addr - exe_base));
+                    }
+                }
+            }
+            fprintf(pf, "\n");
+            fclose(pf);
+        }
+    }
 
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
         return EXCEPTION_CONTINUE_SEARCH;
@@ -159,8 +210,23 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
             }
         }
 
-        // Zero the most likely destination (RAX is used for return values)
-        ep->ContextRecord->Rax = 0;
+        // Zero the destination register properly based on ModRM encoding
+        // Register order in x86-64: RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8-R15
+        DWORD64* ctx_regs[] = {
+            &ep->ContextRecord->Rax, &ep->ContextRecord->Rcx,
+            &ep->ContextRecord->Rdx, &ep->ContextRecord->Rbx,
+            &ep->ContextRecord->Rsp, &ep->ContextRecord->Rbp,
+            &ep->ContextRecord->Rsi, &ep->ContextRecord->Rdi,
+            &ep->ContextRecord->R8,  &ep->ContextRecord->R9,
+            &ep->ContextRecord->R10, &ep->ContextRecord->R11,
+            &ep->ContextRecord->R12, &ep->ContextRecord->R13,
+            &ep->ContextRecord->R14, &ep->ContextRecord->R15,
+        };
+        if (reg_idx < 16 && reg_idx != 4) {  // Don't zero RSP!
+            *ctx_regs[reg_idx] = 0;
+        } else {
+            ep->ContextRecord->Rax = 0;
+        }
 
         // Skip the instruction (estimate: 2-8 bytes for MOV with displacement)
         // This is imprecise but better than crashing
