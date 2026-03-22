@@ -40,6 +40,67 @@
 static uint64_t g_null_object_host_addr = 0;  // Host address for x86 code
 static uint32_t g_null_object_guest_addr = 0;  // Guest address for PPC loads
 
+// Watchdog: sample all threads to find which PPC function is spinning
+#include <tlhelp32.h>
+
+static void WatchdogThread() {
+    Sleep(5000);
+    DWORD pid = GetCurrentProcessId();
+    DWORD my_tid = GetCurrentThreadId();
+    HMODULE exe = GetModuleHandleA(NULL);
+    MODULEINFO mi = {};
+    GetModuleInformation(GetCurrentProcess(), exe, &mi, sizeof(mi));
+    uint64_t exe_base = (uint64_t)mi.lpBaseOfDll;
+    uint64_t exe_end = exe_base + mi.SizeOfImage;
+
+    FILE* wf = fopen("saintsrow_watchdog.log", "w");
+    if (!wf) return;
+    for (int s = 0; s < 10; s++) {
+        fprintf(wf, "--- Sample %d ---\n", s);
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            THREADENTRY32 te = { sizeof(te) };
+            if (Thread32First(snap, &te)) do {
+                if (te.th32OwnerProcessID != pid || te.th32ThreadID == my_tid) continue;
+                HANDLE ht = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, te.th32ThreadID);
+                if (!ht) continue;
+                SuspendThread(ht);
+                CONTEXT ctx = {};
+                ctx.ContextFlags = CONTEXT_CONTROL;
+                if (GetThreadContext(ht, &ctx)) {
+                    uint64_t rip = ctx.Rip;
+                    if (rip >= exe_base && rip < exe_end) {
+                        uint32_t best_ppc = 0; uint64_t best_dist = UINT64_MAX;
+                        for (int j = 0; PPCFuncMappings[j].guest != 0; j++) {
+                            uint64_t fn = (uint64_t)PPCFuncMappings[j].host;
+                            if (fn <= rip && (rip - fn) < best_dist) {
+                                best_dist = rip - fn; best_ppc = (uint32_t)PPCFuncMappings[j].guest;
+                            }
+                        }
+                        fprintf(wf, "  TID=%lu exe+0x%llX", te.th32ThreadID, (unsigned long long)(rip - exe_base));
+                        if (best_ppc && best_dist < 0x1000000)
+                            fprintf(wf, " -> PPC 0x%08X (+0x%llX)", best_ppc, (unsigned long long)best_dist);
+                        fprintf(wf, "\n");
+                    } else {
+                        // Print non-exe threads too, with module info
+                        HMODULE hm = NULL;
+                        char mn[64] = "??";
+                        if (GetModuleHandleExA(6, (LPCSTR)rip, &hm))
+                            GetModuleBaseNameA(GetCurrentProcess(), hm, mn, sizeof(mn));
+                        fprintf(wf, "  TID=%lu %s+0x%llX\n", te.th32ThreadID, mn, (unsigned long long)(rip - (uint64_t)hm));
+                    }
+                }
+                ResumeThread(ht);
+                CloseHandle(ht);
+            } while (Thread32Next(snap, &te));
+            CloseHandle(snap);
+        }
+        fflush(wf);
+        Sleep(1000);
+    }
+    fclose(wf);
+}
+
 static void InitNullObjectPage(uint8_t* membase) {
     // Allocate a page in guest address space for the null object
     // Use address 0x0F000000 (in the v00000000 heap, unlikely to conflict)
@@ -533,6 +594,9 @@ public:
         // Register null page handler AFTER SDK initialization
         AddVectoredExceptionHandler(1, NullPageHandler);
         REXLOG_INFO("Null page handler registered");
+
+        // Start watchdog thread to sample PPC execution
+        std::thread(WatchdogThread).detach();
 
         REXLOG_INFO("XEX fully loaded. Attempting window creation...");
         spdlog::default_logger()->flush();
