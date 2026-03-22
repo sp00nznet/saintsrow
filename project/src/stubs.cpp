@@ -109,20 +109,9 @@ PPC_FUNC(sub_827166C0) {
 // sub_82653F98 is the function where the null dereference occurs.
 // It receives arguments in r3-r10 and accesses fields from objects.
 // Hook it to log the arguments and identify which is null.
-// Stub sub_82653F98 as a no-op to skip the render subsystem init that crashes
-// This lets the game continue past the null pointer and reach its main loop
-PPC_FUNC(sub_82653F98) {
-    static int skip_count = 0;
-    if (++skip_count <= 3) {
-        FILE* df = fopen("saintsrow_render_debug.log", "a");
-        if (df) {
-            fprintf(df, "sub_82653F98 SKIPPED (#%d) -- render subsystem init stubbed\n", skip_count);
-            fclose(df);
-        }
-    }
-    // Don't call the original -- just return
-    // The caller (sub_82648ED8) will continue with the next function
-}
+// Let sub_82653F98 run normally -- the null page handler with null object
+// pool should prevent the cascading crashes
+// PPC_FUNC(sub_82653F98) { ... }
 
 // ============================================================================
 // Content / License Stubs

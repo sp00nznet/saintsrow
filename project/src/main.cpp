@@ -29,10 +29,44 @@
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 
-// Null-page access handler: intercepts null pointer dereferences in recompiled
-// code and zeros the destination register instead of crashing. This handles
-// cases where the game accesses uninitialized pointers (GPU device, user
-// profile, etc.) that would be valid on real hardware.
+// Null object page: a 64K block of zeroed guest memory that acts as a "safe"
+// target for null pointer dereferences. When game code reads [null+offset],
+// instead of crashing we return a pointer to this zeroed page, so subsequent
+// field reads get 0 values instead of cascading crashes.
+//
+// We also make the null page self-referencing: every 4-byte aligned slot
+// points back to itself, so pointer chains like obj->field->subfield all
+// resolve to the null page.
+static uint64_t g_null_object_host_addr = 0;  // Host address for x86 code
+static uint32_t g_null_object_guest_addr = 0;  // Guest address for PPC loads
+
+static void InitNullObjectPage(uint8_t* membase) {
+    // Allocate a page in guest address space for the null object
+    // Use address 0x0F000000 (in the v00000000 heap, unlikely to conflict)
+    g_null_object_guest_addr = 0x0F000000;
+    uint8_t* host = membase + g_null_object_guest_addr;
+    g_null_object_host_addr = (uint64_t)host;
+
+    // Commit the page
+    VirtualAlloc(host, 0x10000, MEM_COMMIT, PAGE_READWRITE);
+    memset(host, 0, 0x10000);
+
+    // Make every 4-byte slot self-referencing with the HOST address
+    // The generated x86 code works with host addresses directly
+    // For 64-bit pointers, fill with the host address
+    // For 32-bit PPC loads (PPC_LOAD_U32), fill with guest address
+    // Since the code might use either, use 0 (safest) -- the demand pager
+    // will handle subsequent faults
+    // Actually: the generated code uses PPC_LOAD_U32 which reads from
+    // (base + guest_addr), so the values stored should be guest addresses
+    // that will be translated. Let's fill with the guest addr.
+    uint32_t* slots = (uint32_t*)host;
+    for (int i = 0; i < 0x10000 / 4; i++) {
+        slots[i] = 0;  // Zero is safest -- prevents infinite self-reference loops
+    }
+}
+
+// Null-page access handler
 static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     // For null page faults, try to identify the PPC function
     // by checking return addresses in the stack against the function mapping table
@@ -250,19 +284,29 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         static const char* reg_names[] = {"rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi",
             "r8","r9","r10","r11","r12","r13","r14","r15"};
         if (reg_idx < 16 && reg_idx != 4) {  // Don't zero RSP!
-            FILE* rf = fopen("saintsrow_all_crashes.log", "a");
-            if (rf) {
-                // Log which register holds the base address (from ModRM rm field)
-                int rm = modrm & 7;
-                if (rex & 0x01) rm += 8;  // REX.B
-                fprintf(rf, "[NULL-DETAIL] dest=%s base_reg=%s base_val=0x%llX\n",
-                    reg_names[reg_idx], rm < 16 ? reg_names[rm] : "?",
-                    rm < 16 ? *ctx_regs[rm] : 0ULL);
-                fclose(rf);
+            // Instead of zeroing, point to the null object page (HOST address)
+            // This prevents cascading null derefs down pointer chains
+            // The x86 code uses host addresses, so we give it the host addr
+            if (g_null_object_host_addr != 0) {
+                *ctx_regs[reg_idx] = g_null_object_host_addr;
+            } else {
+                *ctx_regs[reg_idx] = 0;
             }
-            *ctx_regs[reg_idx] = 0;
+            static int null_detail_count = 0;
+            if (++null_detail_count <= 30) {
+                int rm = modrm & 7;
+                if (rex & 0x01) rm += 8;
+                FILE* rf = fopen("saintsrow_all_crashes.log", "a");
+                if (rf) {
+                    fprintf(rf, "[NULL-OBJ] dest=%s -> host 0x%llX (was reading [%s+0x%llX])\n",
+                        reg_names[reg_idx], (unsigned long long)g_null_object_host_addr,
+                        rm < 16 ? reg_names[rm] : "?",
+                        (unsigned long long)fault_addr);
+                    fclose(rf);
+                }
+            }
         } else {
-            ep->ContextRecord->Rax = 0;
+            ep->ContextRecord->Rax = g_null_object_host_addr ? g_null_object_host_addr : 0;
         }
 
         // Skip the instruction (estimate: 2-8 bytes for MOV with displacement)
@@ -411,8 +455,11 @@ public:
         REXLOG_INFO("XEX image loaded successfully!");
         spdlog::default_logger()->flush();
 
+        // Initialize null object page in guest memory
+        InitNullObjectPage(runtime_->memory()->virtual_membase());
+        REXLOG_INFO("Null object page at guest 0x{:08X}", g_null_object_guest_addr);
+
         // Register null page handler AFTER SDK initialization
-        // (must come after SDK's MMIO handler to avoid conflicts)
         AddVectoredExceptionHandler(1, NullPageHandler);
         REXLOG_INFO("Null page handler registered");
 
