@@ -121,8 +121,49 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         }
     }
 
+    // Handle ILLEGAL_INSTRUCTION (ud2 from __builtin_trap in SDK code)
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION) {
+        uint8_t* ip = (uint8_t*)ep->ContextRecord->Rip;
+        if (ip[0] == 0x0F && ip[1] == 0x0B) {
+            // ud2 instruction - skip it (2 bytes)
+            static int ud2_count = 0;
+            if (++ud2_count <= 20) {
+                FILE* uf = fopen("saintsrow_all_crashes.log", "a");
+                if (uf) {
+                    fprintf(uf, "[UD2] __builtin_trap at RIP=0x%llX -- skipped\n",
+                        (unsigned long long)ep->ContextRecord->Rip);
+                    fclose(uf);
+                }
+            }
+            ep->ContextRecord->Rip += 2;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
         return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    // Handle null function pointer calls (RIP is 0 or in null object page)
+    // This happens when code does `call [ptr]` where ptr was null/zeroed
+    auto fault_rip = ep->ContextRecord->Rip;
+    if (fault_rip < 0x10000 || (g_null_object_host_addr && fault_rip >= g_null_object_host_addr && fault_rip < g_null_object_host_addr + 0x10000)) {
+        // Simulate a `ret` - pop return address from stack, return 0
+        uint64_t* rsp = (uint64_t*)ep->ContextRecord->Rsp;
+        ep->ContextRecord->Rip = *rsp;  // Pop return address
+        ep->ContextRecord->Rsp += 8;     // Adjust stack
+        ep->ContextRecord->Rax = 0;      // Return 0
+        static int null_call_count = 0;
+        if (++null_call_count <= 20) {
+            FILE* nf = fopen("saintsrow_all_crashes.log", "a");
+            if (nf) {
+                fprintf(nf, "[NULL-CALL] call to 0x%llX, returning to 0x%llX with RAX=0\n",
+                    (unsigned long long)fault_rip, (unsigned long long)ep->ContextRecord->Rip);
+                fclose(nf);
+            }
+        }
+        return EXCEPTION_CONTINUE_EXECUTION;
     }
 
     auto fault_addr = ep->ExceptionRecord->ExceptionInformation[1];
