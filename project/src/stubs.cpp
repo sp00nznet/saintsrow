@@ -120,21 +120,55 @@ extern "C" void __imp__sub_82186F08(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82648ED8) {
     static int count = 0;
     count++;
-    if (count <= 5 || (count % 100 == 0)) {
-        FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-        if (hf) { fprintf(hf, "[TICK-648ED8] #%d r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
-    }
+    FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+    if (hf) { fprintf(hf, "[TICK-648ED8] #%d ENTER r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
     __imp__sub_82648ED8(ctx, base);
+    hf = fopen("saintsrow_heartbeat.log", "a");
+    if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
 }
+
+// Trace each sub-call in the main game loop (sub_82186F08)
+#define TRACE_CALL(name, addr) \
+    extern "C" void __imp__sub_##addr(PPCContext& ctx, uint8_t* base); \
+    PPC_FUNC(sub_##addr) { \
+        static int _c = 0; _c++; \
+        if (_c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+            if (f) { fprintf(f, "[" name "] ENTER #%d\n", _c); fclose(f); } } \
+        __imp__sub_##addr(ctx, base); \
+        if (_c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+            if (f) { fprintf(f, "[" name "] EXIT #%d\n", _c); fclose(f); } } \
+    }
+
+TRACE_CALL("GameUpdate", 822827B0)
+TRACE_CALL("VideoMgr", 821FB9D8)
+TRACE_CALL("RenderA", 826365E0)
+TRACE_CALL("RenderB", 8263DE08)
+TRACE_CALL("RenderC", 8263DD80)
+TRACE_CALL("RenderD", 82636688)
+TRACE_CALL("BinkClean", 821FB070)
+// sub_82604C10 blocks on a critical section after main loop exits.
+// Stub it to return 0 to unblock the game thread.
+PPC_FUNC(sub_82604C10) {
+    static int c = 0;
+    if (++c <= 3) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[PostLoop1] STUBBED #%d\n", c); fclose(f); }
+    }
+    ctx.r3.u64 = 0;
+}
+TRACE_CALL("CreateThr", 82716028)
+TRACE_CALL("WaitThr", 82716038)
+TRACE_CALL("PostLoop5", 82185498)
+#undef TRACE_CALL
 
 PPC_FUNC(sub_82186F08) {
     static int count = 0;
     count++;
-    if (count <= 10 || (count % 100 == 0)) {
-        FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-        if (hf) { fprintf(hf, "[LOOP-186F08] #%d r3=0x%08X r4=0x%08X\n", count, ctx.r3.u32, ctx.r4.u32); fclose(hf); }
-    }
+    FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+    if (hf) { fprintf(hf, "[LOOP-186F08] #%d ENTER\n", count); fclose(hf); }
     __imp__sub_82186F08(ctx, base);
+    hf = fopen("saintsrow_heartbeat.log", "a");
+    if (hf) { fprintf(hf, "[LOOP-186F08] #%d EXIT\n", count); fclose(hf); }
 }
 
 
@@ -195,15 +229,13 @@ PPC_FUNC_IMPL(xstart) {
 
 // ============================================================================
 // Render wait thread - sub_825DF970
-// Original waits on a VSync event. Replace with simple idle loop so the
-// game thread isn't blocked waiting for this thread to process frames.
+// Let it run normally - the blocking might be needed for synchronization
 // ============================================================================
+extern "C" void __imp__sub_825DF970(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825DF970) {
     FILE* f = fopen("saintsrow_heartbeat.log", "a");
-    if (f) { fprintf(f, "[RENDER-WAIT] stub: idling instead of event wait\n"); fclose(f); }
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
+    if (f) { fprintf(f, "[RENDER-WAIT] running normally\n"); fclose(f); }
+    __imp__sub_825DF970(ctx, base);
 }
 
 // ============================================================================
