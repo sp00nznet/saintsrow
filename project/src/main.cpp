@@ -92,15 +92,25 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         return EXCEPTION_CONTINUE_EXECUTION;
     }
 
-    // Unhandled instruction pattern - log and crash
+    // Log the full crash info including thread ID
     FILE* f = fopen("saintsrow_crash.log", "w");
     if (f) {
-        fprintf(f, "NULL PAGE FAULT: addr=0x%llX RIP=0x%llX\n",
-            (unsigned long long)fault_addr, (unsigned long long)ep->ContextRecord->Rip);
+        fprintf(f, "NULL PAGE FAULT: addr=0x%llX RIP=0x%llX TID=%lu\n",
+            (unsigned long long)fault_addr, (unsigned long long)ep->ContextRecord->Rip,
+            GetCurrentThreadId());
         fprintf(f, "Instruction bytes: %02X %02X %02X %02X %02X %02X %02X %02X\n",
             rip[0], rip[1], rip[2], rip[3], rip[4], rip[5], rip[6], rip[7]);
-        fprintf(f, "RAX=0x%016llX RCX=0x%016llX\n",
-            ep->ContextRecord->Rax, ep->ContextRecord->Rcx);
+        fprintf(f, "RAX=0x%016llX RCX=0x%016llX RDX=0x%016llX\n",
+            ep->ContextRecord->Rax, ep->ContextRecord->Rcx, ep->ContextRecord->Rdx);
+        fprintf(f, "RDI=0x%016llX RSI=0x%016llX RBX=0x%016llX\n",
+            ep->ContextRecord->Rdi, ep->ContextRecord->Rsi, ep->ContextRecord->Rbx);
+        fprintf(f, "RBP=0x%016llX RSP=0x%016llX\n",
+            ep->ContextRecord->Rbp, ep->ContextRecord->Rsp);
+        void* stack[32];
+        WORD frames = CaptureStackBackTrace(0, 32, stack, NULL);
+        fprintf(f, "Stack (%d frames):\n", frames);
+        for (WORD i = 0; i < frames; i++)
+            fprintf(f, "  [%d] 0x%p\n", i, stack[i]);
         fclose(f);
     }
     return EXCEPTION_CONTINUE_SEARCH;

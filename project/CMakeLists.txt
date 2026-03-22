@@ -17,6 +17,7 @@ endif()
 # User source files
 set(SAINTSROW_SOURCES
     src/main.cpp
+    src/stubs.cpp
 )
 
 # Rex app implementation (graphics, audio, overlay setup)
