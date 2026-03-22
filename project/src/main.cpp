@@ -258,6 +258,13 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     // Guest range 0xA0000000-0xBFFFFFFF maps to host 0x1A0000000-0x1BFFFFFFF
     // Also handle 0x80000000-0x8FFFFFFF (XEX heap) and other guest ranges
     else if (fault_addr >= 0x100000000ull && fault_addr < 0x200000000ull) {
+        // Don't demand-page guest address 0 (null page should remain invalid)
+        uint32_t guest_addr = (uint32_t)(fault_addr - 0x100000000ull);
+        if (guest_addr < 0x10000) {
+            // This is a null page access via membase translation - treat as null deref
+            // Fall through to the instruction decoder below
+            goto null_page_handler;
+        }
         // Commit the page on demand (4KB aligned)
         void* page_addr = (void*)(fault_addr & ~0xFFFull);
         void* result = VirtualAlloc(page_addr, 0x10000, MEM_COMMIT, PAGE_READWRITE);
@@ -287,19 +294,25 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
             uint8_t modrm = call_ip[ci + 1];
             int reg_field = (modrm >> 3) & 7;
             if (reg_field == 2 || reg_field == 3) {  // CALL or CALLF
-                // Simulate ret: pop return address, set RAX=0
-                uint64_t* rsp = (uint64_t*)ep->ContextRecord->Rsp;
-                ep->ContextRecord->Rip = *rsp;
-                ep->ContextRecord->Rsp += 8;
+                // The fault is from reading the call target from memory
+                // (e.g. call [rsi+rax*2]). The call hasn't pushed a return
+                // address yet - skip the entire call instruction and set RAX=0.
+                int oplen = ci + 2;  // prefix + FF + modrm
+                int mod = modrm >> 6;
+                int crm = modrm & 7;
+                if (crm == 4 && mod != 3) oplen += 1;  // SIB
+                if (mod == 0 && crm == 5) oplen += 4;  // RIP-relative
+                else if (mod == 1) oplen += 1;  // disp8
+                else if (mod == 2) oplen += 4;  // disp32
+                ep->ContextRecord->Rip += oplen;
                 ep->ContextRecord->Rax = 0;
                 static int bad_call_count = 0;
                 if (++bad_call_count <= 20) {
                     FILE* bf = fopen("saintsrow_all_crashes.log", "a");
                     if (bf) {
-                        fprintf(bf, "[BAD-CALL] call through 0x%llX at RIP=0x%llX, returning to 0x%llX\n",
-                            (unsigned long long)fault_addr,
-                            (unsigned long long)ep->ContextRecord->Rip,
-                            (unsigned long long)*rsp);
+                        fprintf(bf, "[BAD-CALL] call [mem] at RIP+0x%llX fault_addr=0x%llX -- skipped (%d bytes)\n",
+                            (unsigned long long)(ep->ContextRecord->Rip - oplen - (uint64_t)call_ip + (uint64_t)call_ip),
+                            (unsigned long long)fault_addr, oplen);
                         fclose(bf);
                     }
                 }
@@ -311,6 +324,7 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         // Fall through to the instruction decoder below
     }
 
+null_page_handler:
     // Check if crash is in MSVCP140's _Thrd_abort (offset 0x123D2)
     // This happens when a thread wait operation uses a destroyed sync object
     HMODULE hMod = NULL;
@@ -356,10 +370,17 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     uint8_t* rip = (uint8_t*)ep->ContextRecord->Rip;
     DWORD64* regs = &ep->ContextRecord->Rax;
 
-    // Simple MOV reg, [reg+disp] decoder for common patterns
-    // REX prefix
+    // x86-64 instruction prefix + opcode decoder
     int rex = 0;
     int i = 0;
+    // Skip legacy prefixes (66, 67, F2, F3, 2E, 3E, 26, 36, 64, 65)
+    while (rip[i] == 0x66 || rip[i] == 0x67 || rip[i] == 0xF0 || rip[i] == 0xF2 || rip[i] == 0xF3 ||
+           rip[i] == 0x2E || rip[i] == 0x3E || rip[i] == 0x26 || rip[i] == 0x36 ||
+           rip[i] == 0x64 || rip[i] == 0x65) {
+        i++;
+        if (i > 4) break;  // Safety limit
+    }
+    // REX prefix (0x40-0x4F)
     if ((rip[i] & 0xF0) == 0x40) {
         rex = rip[i++];
     }
@@ -377,10 +398,33 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         }
     }
 
-    if (rip[i] == 0x8B || rip[i] == 0x0FB6 || rip[i] == 0x0FB7 || rip[i] == 0x63 ||
-        rip[i] == 0x3B || rip[i] == 0x39 || rip[i] == 0x85 ||
-        (rip[i] == 0x0F && (rip[i+1] == 0xB6 || rip[i+1] == 0xB7 || rip[i+1] == 0xBE || rip[i+1] == 0xBF))) {
-        // It's a MOV/MOVZX/MOVSX/MOVSXD/CMP/TEST - zero dest and skip
+    // Handle any instruction with a ModRM byte that accesses memory
+    // This covers MOV, MOVZX, MOVSX, CMP, TEST, ADD, SUB, AND, OR, XOR, etc.
+    bool has_modrm = false;
+    int oplen = 1;
+    uint8_t op = rip[i];
+    if (op == 0x0F && (rip[i+1] == 0x38 || rip[i+1] == 0x3A)) {
+        has_modrm = true; oplen = 3;  // 3-byte opcode (0F 38 xx / 0F 3A xx)
+        if (rip[i+1] == 0x3A) oplen = 3;  // 0F3A has imm8 but we handle that separately
+    } else if (op == 0x0F && (rip[i+1] == 0xB6 || rip[i+1] == 0xB7 || rip[i+1] == 0xBE || rip[i+1] == 0xBF ||
+                       rip[i+1] == 0xB0 || rip[i+1] == 0xB1 ||  // CMPXCHG
+                       rip[i+1] == 0xC1 || rip[i+1] == 0xC0 ||  // XADD
+                       rip[i+1] == 0xAF ||  // IMUL
+                       rip[i+1] == 0xA3 || rip[i+1] == 0xAB || rip[i+1] == 0xB3 || rip[i+1] == 0xBB)) {  // BT/BTS/BTR/BTC
+        has_modrm = true; oplen = 2;  // 2-byte opcode
+    } else if (op == 0x8B || op == 0x89 || op == 0x8A || op == 0x88 ||  // MOV variants
+               op == 0x3B || op == 0x39 || op == 0x3A || op == 0x38 ||  // CMP variants
+               op == 0x85 || op == 0x84 ||  // TEST
+               op == 0x63 ||  // MOVSXD
+               op == 0x03 || op == 0x01 || op == 0x2B || op == 0x29 ||  // ADD/SUB
+               op == 0x23 || op == 0x21 || op == 0x0B || op == 0x09 ||  // AND/OR
+               op == 0x33 || op == 0x31 ||  // XOR
+               op == 0x80 || op == 0x81 || op == 0x83 ||  // Immediate ops
+               op == 0x86 || op == 0x87) {  // XCHG
+        has_modrm = true; oplen = 1;
+    }
+    if (has_modrm) {
+        // It's an instruction with ModRM - zero dest register and skip
         // Find dest register from ModRM byte
         int oplen = (rip[i] == 0x0F) ? 2 : 1;
         uint8_t modrm = rip[i + oplen];
@@ -444,15 +488,40 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         // Skip the instruction (estimate: 2-8 bytes for MOV with displacement)
         // This is imprecise but better than crashing
         int mod = modrm >> 6;
+        int rm = modrm & 7;
         int insn_len = i + oplen + 1;  // prefix + opcode + modrm
-        if (mod == 0 && (modrm & 7) == 5) insn_len += 4;  // RIP-relative
-        else if (mod == 0 && (modrm & 7) == 4) insn_len += 1;  // SIB
-        else if (mod == 1) insn_len += 1;  // disp8
+        // SIB byte present when rm==4 and mod!=3
+        bool has_sib = (rm == 4 && mod != 3);
+        if (has_sib) insn_len += 1;
+        // Displacement
+        if (mod == 0 && rm == 5) insn_len += 4;  // RIP-relative (no SIB special case)
+        else if (mod == 0 && has_sib) {
+            uint8_t sib = rip[i + oplen + 1];
+            if ((sib & 7) == 5) insn_len += 4;  // SIB base=5 with mod=0 means disp32
+        }
+        if (mod == 1) insn_len += 1;  // disp8
         else if (mod == 2) insn_len += 4;  // disp32
-        if ((modrm & 7) == 4 && mod != 3) insn_len += 1;  // SIB byte
+
+        // Add immediate operand size for certain opcodes
+        if (op == 0x80 || op == 0x83) insn_len += 1;  // imm8
+        else if (op == 0x81) insn_len += 4;  // imm32
 
         ep->ContextRecord->Rip += insn_len;
         return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    // Fallback: log unhandled instruction and let the crash handler produce a log
+    {
+        static int fallback_count = 0;
+        if (++fallback_count <= 20) {
+            FILE* ff = fopen("saintsrow_all_crashes.log", "a");
+            if (ff) {
+                fprintf(ff, "[UNHANDLED-AV] addr=0x%llX RIP=0x%llX bytes=%02X%02X%02X%02X\n",
+                    (unsigned long long)fault_addr, (unsigned long long)ep->ContextRecord->Rip,
+                    rip[0], rip[1], rip[2], rip[3]);
+                fclose(ff);
+            }
+        }
     }
 
     // Log the full crash info including thread ID and module name
