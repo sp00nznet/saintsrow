@@ -115,8 +115,33 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     }
 
     // Handle null page accesses (addresses 0x0 - 0xFFFF)
-    // Also handle the specific MSVCP140 _Thrd_abort crash at addr 0x58
-    if (fault_addr >= 0x10000) {
+    if (fault_addr < 0x10000) {
+        // Fall through to null page handler below
+    }
+    // Handle writes to uncommitted guest physical memory (GPU command buffer)
+    // Guest range 0xA0000000-0xBFFFFFFF maps to host 0x1A0000000-0x1BFFFFFFF
+    // Also handle 0x80000000-0x8FFFFFFF (XEX heap) and other guest ranges
+    else if (fault_addr >= 0x100000000ull && fault_addr < 0x200000000ull) {
+        // Commit the page on demand (4KB aligned)
+        void* page_addr = (void*)(fault_addr & ~0xFFFull);
+        void* result = VirtualAlloc(page_addr, 0x10000, MEM_COMMIT, PAGE_READWRITE);
+        if (result) {
+            static int demand_page = 0;
+            if (++demand_page <= 20) {
+                FILE* gf = fopen("saintsrow_all_crashes.log", "a");
+                if (gf) {
+                    fprintf(gf, "[DEMAND-PAGE] committed 64K at host 0x%llX (guest 0x%08X)\n",
+                        (unsigned long long)(uintptr_t)page_addr,
+                        (uint32_t)(fault_addr - 0x100000000ull));
+                    fclose(gf);
+                }
+            }
+            return EXCEPTION_CONTINUE_EXECUTION;  // Retry the faulting instruction
+        }
+        // VirtualAlloc failed - skip the instruction instead
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    else {
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
