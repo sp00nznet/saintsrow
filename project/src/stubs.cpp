@@ -175,6 +175,19 @@ TRACE_CALL("GL2_Init2", 8220E5E0)
 TRACE_CALL("GL2_Func1", 8216E338)
 TRACE_CALL("GL2_Func2", 821700F0)
 TRACE_CALL("GL2_Func3", 8220FD60)
+TRACE_CALL("GL2_Render", 8262FFE0)
+TRACE_CALL("GL2_Timer", 82717EC8)
+// sub_8234C1C0 = physics update - crashes without proper world data
+PPC_FUNC(sub_8234C1C0) {
+    static int c = 0;
+    if (++c <= 3) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GL2_Physics] STUBBED #%d\n", c); fclose(f); }
+    }
+    ctx.r3.u64 = 0;
+}
+TRACE_CALL("GL2_World", 82355E88)
+TRACE_CALL("GL2_Spawn", 8265AF50)
 TRACE_CALL("ThreadWrap", 82716078)
 // sub_82716020 already hooked above for force-flag
 // sub_82604C10 blocks on a critical section after main loop exits.
@@ -190,12 +203,15 @@ PPC_FUNC(sub_82604C10) {
 TRACE_CALL("CreateThr", 82716028)
 TRACE_CALL("WaitThr", 82716038)
 // sub_82185498 crashes on vtable dispatch through null object chain.
-// Stub it to skip the transition cleanup.
+// Stub it and also force the loading flag to 0 so the wait loop runs
 PPC_FUNC(sub_82185498) {
     static int c = 0;
     if (++c <= 3) {
+        // Force the "loading complete" flag to 0 so the game enters the wait loop
+        // which leads to RenderSetup → InitWorld → GameLoop2
+        PPC_STORE_U8(0x8370D6C9, 0);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[PostLoop5] STUBBED #%d\n", c); fclose(f); }
+        if (f) { fprintf(f, "[PostLoop5] STUBBED #%d, cleared load flag\n", c); fclose(f); }
     }
     ctx.r3.u64 = 0;
 }
