@@ -86,6 +86,46 @@ PPC_FUNC(sub_82789EE8) { // BinkOpen
         if (f) { fprintf(f, "[BinkOpen #%d] returned handle=0x%08X\n", c, ctx.r3.u32); fclose(f); } }
 }
 
+// Force render flag so VdSwap gets called
+// The render wait thread checks [r31+10810] & 0x4
+// We need to find r31's value and set the flag
+// r31 comes from a global pointer chain in the render wait thread
+// Let's hook sub_825E5320 (render) and sub_825E54A8 (swap) directly instead
+extern "C" void __imp__sub_825E54A8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825E54A8) {
+    static int c = 0;
+    if (++c <= 5) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[VdSwap-Func #%d] ENTER r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+    __imp__sub_825E54A8(ctx, base);
+    if (c <= 5) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[VdSwap-Func #%d] EXIT\n", c); fclose(f); }
+    }
+}
+
+// Hook the render wait thread to force the render flag
+extern "C" void __imp__sub_825DF970(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825DF970) {
+    // Find r31 through the pointer chain: r31 = [[0x82800658]]
+    uint32_t ptr1 = PPC_LOAD_U32(0x82800658);
+    uint32_t r31_val = ptr1 ? PPC_LOAD_U32(ptr1) : 0;
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[RENDER-WAIT] ptr=0x%08X r31=0x%08X\n", ptr1, r31_val); fclose(f); }
+
+    // Force the render flag at [r31+10810] |= 0x4
+    if (r31_val) {
+        uint8_t flag = PPC_LOAD_U8(r31_val + 10810);
+        PPC_STORE_U8(r31_val + 10810, flag | 0x4);
+        f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[RENDER-WAIT] forced flag 0x%02X -> 0x%02X at 0x%08X\n",
+            flag, flag | 0x4, r31_val + 10810); fclose(f); }
+    }
+
+    __imp__sub_825DF970(ctx, base);
+}
+
 // Bink worker thread - let it run for real now
 // (previously stubbed to idle, but Bink needs it for video transitions)
 
@@ -385,16 +425,7 @@ PPC_FUNC_IMPL(xstart) {
     if (f) { fprintf(f, "[XSTART] returned (game exited)\n"); fclose(f); }
 }
 
-// ============================================================================
-// Render wait thread - sub_825DF970
-// Let it run normally - the blocking might be needed for synchronization
-// ============================================================================
-extern "C" void __imp__sub_825DF970(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825DF970) {
-    FILE* f = fopen("saintsrow_heartbeat.log", "a");
-    if (f) { fprintf(f, "[RENDER-WAIT] running normally\n"); fclose(f); }
-    __imp__sub_825DF970(ctx, base);
-}
+// Render wait thread (sub_825DF970) - hooked above with render flag forcing
 
 // ============================================================================
 // Content / License Stubs
