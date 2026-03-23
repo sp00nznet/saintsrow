@@ -202,18 +202,17 @@ PPC_FUNC(sub_82604C10) {
 }
 TRACE_CALL("CreateThr", 82716028)
 TRACE_CALL("WaitThr", 82716038)
-// sub_82185498 crashes on vtable dispatch through null object chain.
-// Stub it and also force the loading flag to 0 so the wait loop runs
+// sub_82185498 - run it for real (VEH handles null vtable crashes)
+// Also clear loading flag so wait loop reaches GameLoop2
+extern "C" void __imp__sub_82185498(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82185498) {
-    static int c = 0;
-    if (++c <= 3) {
-        // Force the "loading complete" flag to 0 so the game enters the wait loop
-        // which leads to RenderSetup → InitWorld → GameLoop2
-        PPC_STORE_U8(0x8370D6C9, 0);
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[PostLoop5] STUBBED #%d, cleared load flag\n", c); fclose(f); }
-    }
-    ctx.r3.u64 = 0;
+    static int c = 0; c++;
+    if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[PostLoop5] RUNNING #%d\n", c); fclose(f); } }
+    __imp__sub_82185498(ctx, base);
+    PPC_STORE_U8(0x8370D6C9, 0);
+    if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[PostLoop5] DONE #%d\n", c); fclose(f); } }
 }
 #undef TRACE_CALL
 
