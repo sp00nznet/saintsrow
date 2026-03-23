@@ -91,6 +91,20 @@ PPC_FUNC(sub_82789EE8) { // BinkOpen
 // We need to find r31's value and set the flag
 // r31 comes from a global pointer chain in the render wait thread
 // Let's hook sub_825E5320 (render) and sub_825E54A8 (swap) directly instead
+extern "C" void __imp__sub_825E5320(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825E5320) {
+    static int c = 0;
+    if (++c <= 5) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[RenderFrame #%d] ENTER\n", c); fclose(f); }
+    }
+    __imp__sub_825E5320(ctx, base);
+    if (c <= 5) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[RenderFrame #%d] EXIT\n", c); fclose(f); }
+    }
+}
+
 extern "C" void __imp__sub_825E54A8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825E54A8) {
     static int c = 0;
@@ -217,14 +231,39 @@ PPC_FUNC(sub_822827B0) {
     }
 }
 TRACE_STATE("VideoMgr", 821FB9D8)
-// VideoDriver - trace every call unconditionally
+// VideoDriver - trace video queue state
 extern "C" void __imp__sub_821FBD10(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_825BFC10(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825BFC10) {
+    __imp__sub_825BFC10(ctx, base);
+    static int c = 0;
+    if (++c <= 5) {
+        uint32_t queue = ctx.r3.u32;
+        uint32_t item = queue ? PPC_LOAD_U32(queue + 8) : 0;
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[VideoQueue #%d] queue=0x%08X [queue+8]=0x%08X\n", c, queue, item); fclose(f); }
+    }
+}
+extern "C" void __imp__sub_82648648(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82648648) {
+    uint32_t in_r3 = ctx.r3.u32;
+    uint32_t in_item = in_r3 ? PPC_LOAD_U32(in_r3 + 8) : 0;
+    __imp__sub_82648648(ctx, base);
+    static int c = 0;
+    if (++c <= 15) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GetPlayItem #%d] in_r3=0x%08X [+8]=0x%08X -> r3=0x%08X\n",
+            c, in_r3, in_item, ctx.r3.u32); fclose(f); }
+    }
+}
 PPC_FUNC(sub_821FBD10) {
-    FILE* f = fopen("saintsrow_heartbeat.log", "a");
-    if (f) { fprintf(f, "[VideoDriver] ENTER r19=0x%08X\n", ctx.r19.u32); fclose(f); }
+    uint32_t r19_before = ctx.r19.u32;
     __imp__sub_821FBD10(ctx, base);
-    f = fopen("saintsrow_heartbeat.log", "a");
-    if (f) { fprintf(f, "[VideoDriver] EXIT\n"); fclose(f); }
+    static int c = 0;
+    if (++c <= 3) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[VideoDriver #%d] r19_in=0x%08X\n", c, r19_before); fclose(f); }
+    }
 }
 TRACE_STATE("RenderA", 826365E0)
 TRACE_STATE("RenderB", 8263DE08)
