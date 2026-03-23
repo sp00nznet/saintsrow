@@ -49,56 +49,13 @@ extern "C" void XamUserGetSigninInfo_entry(
 // section (0x82789600-0x82799724). We stub the key entry points that the
 // game calls to initialize and decode Bink videos.
 
-// Stub ALL Bink video section functions to return 0.
-// The entire BINK section (0x82789600-0x82799724) is RAD Game Tools
-// Bink video middleware. We disable it completely to avoid GPU thread
-// crashes from Bink's Xbox 360-specific hardware video decode.
-// The game skips video playback when Bink functions return null/0.
-#define BINK_STUB(addr) PPC_FUNC(sub_##addr) { ctx.r3.u64 = 0; }
-BINK_STUB(82789600)
-// sub_82789658 = BinkWait: return 1 = "video done / ready for next frame"
-// Returning 0 causes infinite spin in the video playback loop
-PPC_FUNC(sub_82789658) { ctx.r3.u64 = 1; }
-BINK_STUB(827896F0)
-BINK_STUB(8278AF80)
-BINK_STUB(8278AFE0)
-BINK_STUB(8278B210)
-BINK_STUB(8278B380)
-BINK_STUB(8278B410)
-BINK_STUB(8278B4A0)
-BINK_STUB(8278B660)
-BINK_STUB(8278B680)
-BINK_STUB(8278BC20)
-BINK_STUB(8278BDE0)
-BINK_STUB(8278BF58)
-BINK_STUB(8278C240)
+// ============================================================================
+// Bink Video - let recompiled Bink library run for real
+// The splash video rendering initializes the GPU render pipeline.
+// Only stub the worker thread (needs special handling).
+// ============================================================================
 
-// sub_821FBD10 is the video playback driver function.
-// With Bink stubbed, this function enters an infinite loop traversing
-// an uninitialized linked list. Skip it entirely.
-PPC_FUNC(sub_821FBD10) { ctx.r3.u64 = 0; }
-
-// sub_82789EE8 = BinkOpen - returns a Bink handle.
-// The loading system uses this as a gate: if BinkOpen returns 0,
-// no loading tasks are created and the game shows a black screen.
-// Return a fake non-zero handle to let loading proceed.
-PPC_FUNC(sub_82789EE8) {
-    static int c = 0;
-    if (++c <= 5) {
-        // Read the filename string from r3
-        char filename[256] = {0};
-        uint32_t str_addr = ctx.r3.u32;
-        for (int i = 0; i < 255 && str_addr; i++) {
-            filename[i] = (char)PPC_LOAD_U8(str_addr + i);
-            if (!filename[i]) break;
-        }
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[BinkOpen #%d] file='%s' flags=0x%08X\n", c, filename, ctx.r4.u32); fclose(f); }
-    }
-    ctx.r3.u64 = 0xDEAD0001;  // Fake non-zero handle
-}
-
-// Bink worker thread - keep alive but idle
+// Bink worker thread - keep alive but idle (avoids GPU thread conflicts)
 PPC_FUNC(sub_8278D148) {
     uint32_t context_ptr = ctx.r3.u32;
     if (context_ptr) {
@@ -107,9 +64,7 @@ PPC_FUNC(sub_8278D148) {
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-    ctx.r3.u64 = 0;
 }
-#undef BINK_STUB
 
 // ============================================================================
 // Render subsystem init debug hook
@@ -187,24 +142,15 @@ PPC_FUNC(sub_82648ED8) {
 // When internal_state=0, the function immediately exits to state 3 (done).
 // Force internal_state to 2 on first call to enter the loading flow.
 extern "C" void __imp__sub_822827B0(PPCContext& ctx, uint8_t* base);
+// GameUpdate - trace the loading state machine (no more forcing)
 PPC_FUNC(sub_822827B0) {
     static int _c = 0; _c++;
-    uint32_t internal_state = PPC_LOAD_U32(0x8371DD7C);
-    // Internal state 0 means uninitialized.
-    // Force to 1 on first call to trigger loading start (sub_821FB318).
-    // This sets up the video/loading sequence properly.
-    if (internal_state == 0 && _c == 1) {
-        PPC_STORE_U32(0x8371DD7C, 1);
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GameUpdate] forced internal_state 0->1 (start loading)\n"); fclose(f); }
-    }
     __imp__sub_822827B0(ctx, base);
-    uint32_t new_i = PPC_LOAD_U32(0x8371DD7C);
-    uint32_t new_m = PPC_LOAD_U32(0x8370DD7C);
-    uint32_t task_ptr = PPC_LOAD_U32(0x8371D9B4);  // loading task list
-    if (_c <= 10) {
+    if (_c <= 20) {
+        uint32_t new_i = PPC_LOAD_U32(0x8371DD7C);
+        uint32_t new_m = PPC_LOAD_U32(0x8370DD7C);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GameUpdate #%d] int=%u main=%u tasks=0x%08X\n", _c, new_i, new_m, task_ptr); fclose(f); }
+        if (f) { fprintf(f, "[GameUpdate #%d] int=%u main=%u\n", _c, new_i, new_m); fclose(f); }
     }
 }
 TRACE_STATE("VideoMgr", 821FB9D8)
@@ -272,7 +218,6 @@ PPC_FUNC(sub_82185498) {
     if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[PostLoop5] RUNNING #%d\n", c); fclose(f); } }
     __imp__sub_82185498(ctx, base);
-    PPC_STORE_U8(0x8370D6C9, 0);
     if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[PostLoop5] DONE #%d\n", c); fclose(f); } }
 }
@@ -327,19 +272,7 @@ PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
 // The game waits for [0x8370D6C9] to become non-zero, but the loading
 // pipeline doesn't complete due to stubbed subsystems. Force it after
 // a short delay to let the game proceed.
-extern "C" void __imp__sub_82716020(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82716020) {
-    static int call_count = 0;
-    call_count++;
-    __imp__sub_82716020(ctx, base);
-    // After 5 calls, force the loading complete flag
-    if (call_count == 5) {
-        uint32_t flag_addr = 0x8370D6C9;
-        PPC_STORE_U8(flag_addr, 1);
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[FORCE-FLAG] Set load-complete flag at 0x%08X\n", flag_addr); fclose(f); }
-    }
-}
+// sub_82716020 - no longer forcing load flag, let natural loading work
 
 // Override XamInputGetState to report a connected gamepad for user 0
 // Without this, the game detects "no controller" and skips rendering
