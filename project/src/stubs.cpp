@@ -78,6 +78,26 @@ BINK_STUB(8278C240)
 // an uninitialized linked list. Skip it entirely.
 PPC_FUNC(sub_821FBD10) { ctx.r3.u64 = 0; }
 
+// sub_82789EE8 = BinkOpen - returns a Bink handle.
+// The loading system uses this as a gate: if BinkOpen returns 0,
+// no loading tasks are created and the game shows a black screen.
+// Return a fake non-zero handle to let loading proceed.
+PPC_FUNC(sub_82789EE8) {
+    static int c = 0;
+    if (++c <= 5) {
+        // Read the filename string from r3
+        char filename[256] = {0};
+        uint32_t str_addr = ctx.r3.u32;
+        for (int i = 0; i < 255 && str_addr; i++) {
+            filename[i] = (char)PPC_LOAD_U8(str_addr + i);
+            if (!filename[i]) break;
+        }
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkOpen #%d] file='%s' flags=0x%08X\n", c, filename, ctx.r4.u32); fclose(f); }
+    }
+    ctx.r3.u64 = 0xDEAD0001;  // Fake non-zero handle
+}
+
 // Bink worker thread - keep alive but idle
 PPC_FUNC(sub_8278D148) {
     uint32_t context_ptr = ctx.r3.u32;
@@ -195,6 +215,16 @@ TRACE_STATE("RenderD", 82636688)
 #undef TRACE_STATE
 TRACE_CALL("BinkClean", 821FB070)
 TRACE_CALL("LoadStart", 821FB318)
+// ContentLoad with return value logging
+extern "C" void __imp__sub_82107638(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82107638) {
+    __imp__sub_82107638(ctx, base);
+    static int c = 0; c++;
+    if (c <= 5) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[ContentLoad #%d] returned r3=%u\n", c, ctx.r3.u32); fclose(f); }
+    }
+}
 TRACE_CALL("PreInit1", 82184260)
 TRACE_CALL("PreInit2", 82636250)
 TRACE_CALL("PreInit3", 822826B0)
