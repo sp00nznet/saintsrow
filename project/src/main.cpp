@@ -182,6 +182,24 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         }
     }
 
+    // Handle BREAKPOINT (int 3 / assert_always in SDK)
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT) {
+        static int bp_count = 0;
+        if (++bp_count <= 20) {
+            FILE* bf = fopen("saintsrow_all_crashes.log", "a");
+            if (bf) {
+                uint8_t* ip = (uint8_t*)ep->ContextRecord->Rip;
+                fprintf(bf, "[BREAKPOINT #%d] RIP=0x%llX bytes=%02X%02X%02X%02X TID=%lu\n",
+                    bp_count, (unsigned long long)ep->ContextRecord->Rip,
+                    ip[0], ip[1], ip[2], ip[3], GetCurrentThreadId());
+                fclose(bf);
+            }
+        }
+        // Skip the int 3 (1 byte) and continue
+        ep->ContextRecord->Rip += 1;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
     // Handle ILLEGAL_INSTRUCTION (ud2 from __builtin_trap in SDK code)
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION) {
         uint8_t* ip = (uint8_t*)ep->ContextRecord->Rip;

@@ -126,17 +126,6 @@ PPC_FUNC(sub_82648ED8) {
     }
     __imp__sub_82648ED8(ctx, base);
 
-    // Prevent state from becoming 3 (exit) to keep the game in the main loop
-    // State variable at 0x8370DD7C: force it back to non-3
-    uint32_t state = PPC_LOAD_U32(0x8370DD7C);
-    if (state == 3 && count < 1000) {
-        PPC_STORE_U32(0x8370DD7C, 0);  // Reset to 0 = keep running
-        static int reset_count = 0;
-        if (++reset_count <= 5) {
-            FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-            if (hf) { fprintf(hf, "[STATE-RESET] state was 3, reset to 0 at tick %d\n", count); fclose(hf); }
-        }
-    }
     if (count <= 10) {
         FILE* hf = fopen("saintsrow_heartbeat.log", "a");
         if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X state=%u\n", count, ctx.r3.u32, PPC_LOAD_U32(0x8370DD7C)); fclose(hf); }
@@ -174,31 +163,18 @@ TRACE_STATE("VideoMgr", 821FB9D8)
 TRACE_STATE("RenderA", 826365E0)
 TRACE_STATE("RenderB", 8263DE08)
 TRACE_STATE("RenderC", 8263DD80)
-// Special RenderD hook - last function before loop check
-// Reset state to 2 if it becomes 3 to keep the game in the main loop
-extern "C" void __imp__sub_82636688(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82636688) {
-    __imp__sub_82636688(ctx, base);
-    static int _c = 0; _c++;
-    uint32_t state = PPC_LOAD_U32(0x8370DD7C);
-    if (state == 3) {
-        PPC_STORE_U32(0x8370DD7C, 2);  // Keep in state 2 (running)
-        static int rd_reset = 0;
-        if (++rd_reset <= 10) {
-            FILE* f = fopen("saintsrow_heartbeat.log", "a");
-            if (f) { fprintf(f, "[RenderD #%d] state was 3, reset to 2\n", _c); fclose(f); }
-        }
-    } else if (_c <= 5) {
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[RenderD #%d] state=%u\n", _c, state); fclose(f); }
-    }
-}
+TRACE_STATE("RenderD", 82636688)
 #undef TRACE_STATE
 TRACE_CALL("BinkClean", 821FB070)
 TRACE_CALL("RenderSetup", 8220F3C0)
 TRACE_CALL("InitWorld", 82189260)
 TRACE_CALL("GameLoop2", 82186C10)
 TRACE_CALL("Shutdown", 8220D3F0)
+TRACE_CALL("GL2_Init1", 8236FAA0)
+TRACE_CALL("GL2_Init2", 8220E5E0)
+TRACE_CALL("GL2_Func1", 8216E338)
+TRACE_CALL("GL2_Func2", 821700F0)
+TRACE_CALL("GL2_Func3", 8220FD60)
 TRACE_CALL("ThreadWrap", 82716078)
 // sub_82716020 already hooked above for force-flag
 // sub_82604C10 blocks on a critical section after main loop exits.
@@ -286,6 +262,15 @@ PPC_FUNC(sub_82716020) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[FORCE-FLAG] Set load-complete flag at 0x%08X\n", flag_addr); fclose(f); }
     }
+}
+
+// Hook XamLoaderTerminateTitle to catch game exits
+extern "C" void __imp__XamLoaderTerminateTitle(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82789084) {
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[TERMINATE] XamLoaderTerminateTitle called! Blocking exit.\n"); fclose(f); }
+    // Don't actually terminate - just sleep forever
+    while (true) { std::this_thread::sleep_for(std::chrono::seconds(1)); }
 }
 
 // Hook game init to trace progress
