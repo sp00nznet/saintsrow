@@ -127,10 +127,10 @@ PPC_FUNC(sub_82648ED8) {
     __imp__sub_82648ED8(ctx, base);
 
     // Prevent state from becoming 3 (exit) to keep the game in the main loop
-    // State variable at 0x8390DD7C: force it back to non-3
-    uint32_t state = PPC_LOAD_U32(0x8390DD7C);
+    // State variable at 0x8370DD7C: force it back to non-3
+    uint32_t state = PPC_LOAD_U32(0x8370DD7C);
     if (state == 3 && count < 1000) {
-        PPC_STORE_U32(0x8390DD7C, 0);  // Reset to 0 = keep running
+        PPC_STORE_U32(0x8370DD7C, 0);  // Reset to 0 = keep running
         static int reset_count = 0;
         if (++reset_count <= 5) {
             FILE* hf = fopen("saintsrow_heartbeat.log", "a");
@@ -139,7 +139,7 @@ PPC_FUNC(sub_82648ED8) {
     }
     if (count <= 10) {
         FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-        if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X state=%u\n", count, ctx.r3.u32, PPC_LOAD_U32(0x8390DD7C)); fclose(hf); }
+        if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X state=%u\n", count, ctx.r3.u32, PPC_LOAD_U32(0x8370DD7C)); fclose(hf); }
     }
 }
 
@@ -155,12 +155,45 @@ PPC_FUNC(sub_82648ED8) {
             if (f) { fprintf(f, "[" name "] EXIT #%d\n", _c); fclose(f); } } \
     }
 
-TRACE_CALL("GameUpdate", 822827B0)
-TRACE_CALL("VideoMgr", 821FB9D8)
-TRACE_CALL("RenderA", 826365E0)
-TRACE_CALL("RenderB", 8263DE08)
-TRACE_CALL("RenderC", 8263DD80)
-TRACE_CALL("RenderD", 82636688)
+// Trace with state monitoring
+#define TRACE_STATE(name, addr) \
+    extern "C" void __imp__sub_##addr(PPCContext& ctx, uint8_t* base); \
+    PPC_FUNC(sub_##addr) { \
+        uint32_t st_before = PPC_LOAD_U32(0x8370DD7C); \
+        __imp__sub_##addr(ctx, base); \
+        uint32_t st_after = PPC_LOAD_U32(0x8370DD7C); \
+        static int _c = 0; _c++; \
+        if (st_before != st_after || _c <= 5) { \
+            FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+            if (f) { fprintf(f, "[" name " #%d] state %u -> %u\n", _c, st_before, st_after); fclose(f); } \
+        } \
+    }
+
+TRACE_STATE("GameUpdate", 822827B0)
+TRACE_STATE("VideoMgr", 821FB9D8)
+TRACE_STATE("RenderA", 826365E0)
+TRACE_STATE("RenderB", 8263DE08)
+TRACE_STATE("RenderC", 8263DD80)
+// Special RenderD hook - last function before loop check
+// Reset state to 2 if it becomes 3 to keep the game in the main loop
+extern "C" void __imp__sub_82636688(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82636688) {
+    __imp__sub_82636688(ctx, base);
+    static int _c = 0; _c++;
+    uint32_t state = PPC_LOAD_U32(0x8370DD7C);
+    if (state == 3) {
+        PPC_STORE_U32(0x8370DD7C, 2);  // Keep in state 2 (running)
+        static int rd_reset = 0;
+        if (++rd_reset <= 10) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[RenderD #%d] state was 3, reset to 2\n", _c); fclose(f); }
+        }
+    } else if (_c <= 5) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[RenderD #%d] state=%u\n", _c, state); fclose(f); }
+    }
+}
+#undef TRACE_STATE
 TRACE_CALL("BinkClean", 821FB070)
 TRACE_CALL("RenderSetup", 8220F3C0)
 TRACE_CALL("InitWorld", 82189260)
@@ -192,14 +225,13 @@ PPC_FUNC(sub_82185498) {
 }
 #undef TRACE_CALL
 
+// Instead of hooking sub_82186F08, override it completely to control the loop
+// This lets us instrument the loop condition check
 PPC_FUNC(sub_82186F08) {
-    static int count = 0;
-    count++;
-    FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-    if (hf) { fprintf(hf, "[LOOP-186F08] #%d ENTER\n", count); fclose(hf); }
+    // Call the real function but intercept the loop
     __imp__sub_82186F08(ctx, base);
-    hf = fopen("saintsrow_heartbeat.log", "a");
-    if (hf) { fprintf(hf, "[LOOP-186F08] #%d EXIT\n", count); fclose(hf); }
+    FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+    if (hf) { fprintf(hf, "[LOOP-186F08] EXITED\n"); fclose(hf); }
 }
 
 
@@ -239,7 +271,7 @@ PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
 }
 
 // Force the "loading complete" flag after a few ticks
-// The game waits for [0x8390D6C9] to become non-zero, but the loading
+// The game waits for [0x8370D6C9] to become non-zero, but the loading
 // pipeline doesn't complete due to stubbed subsystems. Force it after
 // a short delay to let the game proceed.
 extern "C" void __imp__sub_82716020(PPCContext& ctx, uint8_t* base);
@@ -249,7 +281,7 @@ PPC_FUNC(sub_82716020) {
     __imp__sub_82716020(ctx, base);
     // After 5 calls, force the loading complete flag
     if (call_count == 5) {
-        uint32_t flag_addr = 0x8390D6C9;
+        uint32_t flag_addr = 0x8370D6C9;
         PPC_STORE_U8(flag_addr, 1);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[FORCE-FLAG] Set load-complete flag at 0x%08X\n", flag_addr); fclose(f); }
