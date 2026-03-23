@@ -170,14 +170,21 @@ extern "C" void __imp__sub_822827B0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_822827B0) {
     static int _c = 0; _c++;
     uint32_t internal_state = PPC_LOAD_U32(0x8371DD7C);
-    // Internal state 0 means uninitialized - game immediately transitions to done.
-    // Let it transition naturally to GameLoop2.
-    __imp__sub_822827B0(ctx, base);
-    if (_c <= 10) {
-        uint32_t new_i = PPC_LOAD_U32(0x8371DD7C);
-        uint32_t new_m = PPC_LOAD_U32(0x8370DD7C);
+    // Internal state 0 means uninitialized.
+    // Force to 1 on first call to trigger loading start (sub_821FB318).
+    // This sets up the video/loading sequence properly.
+    if (internal_state == 0 && _c == 1) {
+        PPC_STORE_U32(0x8371DD7C, 1);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GameUpdate #%d] internal=%u main=%u\n", _c, new_i, new_m); fclose(f); }
+        if (f) { fprintf(f, "[GameUpdate] forced internal_state 0->1 (start loading)\n"); fclose(f); }
+    }
+    __imp__sub_822827B0(ctx, base);
+    uint32_t new_i = PPC_LOAD_U32(0x8371DD7C);
+    uint32_t new_m = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t task_ptr = PPC_LOAD_U32(0x8371D9B4);  // loading task list
+    if (_c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GameUpdate #%d] int=%u main=%u tasks=0x%08X\n", _c, new_i, new_m, task_ptr); fclose(f); }
     }
 }
 TRACE_STATE("VideoMgr", 821FB9D8)
@@ -187,6 +194,10 @@ TRACE_STATE("RenderC", 8263DD80)
 TRACE_STATE("RenderD", 82636688)
 #undef TRACE_STATE
 TRACE_CALL("BinkClean", 821FB070)
+TRACE_CALL("LoadStart", 821FB318)
+TRACE_CALL("PreInit1", 82184260)
+TRACE_CALL("PreInit2", 82636250)
+TRACE_CALL("PreInit3", 822826B0)
 TRACE_CALL("RenderSetup", 8220F3C0)
 TRACE_CALL("InitWorld", 82189260)
 TRACE_CALL("GameLoop2", 82186C10)
@@ -297,6 +308,21 @@ PPC_FUNC(sub_82716020) {
         PPC_STORE_U8(flag_addr, 1);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[FORCE-FLAG] Set load-complete flag at 0x%08X\n", flag_addr); fclose(f); }
+    }
+}
+
+// Override XamInputGetState to report a connected gamepad for user 0
+// Without this, the game detects "no controller" and skips rendering
+extern "C" void __imp__XamInputGetState(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82788EC4) {
+    uint32_t user_index = ctx.r3.u32;
+    // Call real implementation first (handles keyboard input mapping)
+    __imp__XamInputGetState(ctx, base);
+    // If it returned "not connected" for user 0, override to "connected"
+    if (user_index == 0 && ctx.r3.u32 != 0) {
+        ctx.r3.u64 = 0;  // X_ERROR_SUCCESS = device connected
+        // The input_state struct at r5 was zeroed by the SDK on failure
+        // A zeroed state means "connected but no buttons pressed" which is fine
     }
 }
 
