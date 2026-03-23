@@ -55,16 +55,8 @@ extern "C" void XamUserGetSigninInfo_entry(
 // Only stub the worker thread (needs special handling).
 // ============================================================================
 
-// Bink worker thread - keep alive but idle (avoids GPU thread conflicts)
-PPC_FUNC(sub_8278D148) {
-    uint32_t context_ptr = ctx.r3.u32;
-    if (context_ptr) {
-        PPC_STORE_U32(context_ptr + 0, 0);  // state = idle
-    }
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-}
+// Bink worker thread - let it run for real now
+// (previously stubbed to idle, but Bink needs it for video transitions)
 
 // ============================================================================
 // Render subsystem init debug hook
