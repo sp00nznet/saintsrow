@@ -132,10 +132,10 @@ PPC_FUNC(sub_82648ED8) {
     extern "C" void __imp__sub_##addr(PPCContext& ctx, uint8_t* base); \
     PPC_FUNC(sub_##addr) { \
         static int _c = 0; _c++; \
-        if (_c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+        if (_c <= 10) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
             if (f) { fprintf(f, "[" name "] ENTER #%d\n", _c); fclose(f); } } \
         __imp__sub_##addr(ctx, base); \
-        if (_c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+        if (_c <= 10) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
             if (f) { fprintf(f, "[" name "] EXIT #%d\n", _c); fclose(f); } } \
     }
 
@@ -146,6 +146,12 @@ TRACE_CALL("RenderB", 8263DE08)
 TRACE_CALL("RenderC", 8263DD80)
 TRACE_CALL("RenderD", 82636688)
 TRACE_CALL("BinkClean", 821FB070)
+TRACE_CALL("RenderSetup", 8220F3C0)
+TRACE_CALL("InitWorld", 82189260)
+TRACE_CALL("GameLoop2", 82186C10)
+TRACE_CALL("Shutdown", 8220D3F0)
+TRACE_CALL("ThreadWrap", 82716078)
+// sub_82716020 already hooked above for force-flag
 // sub_82604C10 blocks on a critical section after main loop exits.
 // Stub it to return 0 to unblock the game thread.
 PPC_FUNC(sub_82604C10) {
@@ -158,7 +164,16 @@ PPC_FUNC(sub_82604C10) {
 }
 TRACE_CALL("CreateThr", 82716028)
 TRACE_CALL("WaitThr", 82716038)
-TRACE_CALL("PostLoop5", 82185498)
+// sub_82185498 crashes on vtable dispatch through null object chain.
+// Stub it to skip the transition cleanup.
+PPC_FUNC(sub_82185498) {
+    static int c = 0;
+    if (++c <= 3) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[PostLoop5] STUBBED #%d\n", c); fclose(f); }
+    }
+    ctx.r3.u64 = 0;
+}
 #undef TRACE_CALL
 
 PPC_FUNC(sub_82186F08) {
@@ -205,6 +220,24 @@ PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
         }
     }
     __imp__RtlLeaveCriticalSection(ctx, base);
+}
+
+// Force the "loading complete" flag after a few ticks
+// The game waits for [0x8390D6C9] to become non-zero, but the loading
+// pipeline doesn't complete due to stubbed subsystems. Force it after
+// a short delay to let the game proceed.
+extern "C" void __imp__sub_82716020(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82716020) {
+    static int call_count = 0;
+    call_count++;
+    __imp__sub_82716020(ctx, base);
+    // After 5 calls, force the loading complete flag
+    if (call_count == 5) {
+        uint32_t flag_addr = 0x8390D6C9;
+        PPC_STORE_U8(flag_addr, 1);
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[FORCE-FLAG] Set load-complete flag at 0x%08X\n", flag_addr); fclose(f); }
+    }
 }
 
 // Hook game init to trace progress
