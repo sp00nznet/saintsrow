@@ -267,6 +267,7 @@ PPC_FUNC(sub_82185498) {
         if (f) { fprintf(f, "[PostLoop5] STUBBED #%d flag=0x%02X r30=0x%08X\n", c, flag_val, ctx.r30.u32); fclose(f); } }
     ctx.r3.u64 = 0;
 }
+TRACE_CALL("FrameRender", 82648D80)
 #undef TRACE_CALL
 
 // Instead of hooking sub_82186F08, override it completely to control the loop
@@ -331,8 +332,29 @@ PPC_FUNC(sub_82716020) {
     }
 }
 
-// XamInputGetState - let real input system handle it
-// (previously faked connected, but render path uses disconnected state)
+// Trace VdSwap - the frame present function
+extern "C" void __imp__VdSwap(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827889E4) {
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[VdSwap #%d] buf=0x%08X fetch=0x%08X fb=0x%08X w=%u h=%u\n",
+            c, ctx.r3.u32, ctx.r4.u32, ctx.r8.u32,
+            PPC_LOAD_U32(ctx.r8.u32 + 12), PPC_LOAD_U32(ctx.r8.u32 + 16)); fclose(f); }
+    }
+    __imp__VdSwap(ctx, base);
+}
+
+// Trace GPU command buffer writer
+extern "C" void __imp__sub_825CC640(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825CC640) {
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GPU-Write #%d] r3=0x%08X r4=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+    }
+    __imp__sub_825CC640(ctx, base);
+}
 
 // Hook XamLoaderTerminateTitle to catch game exits
 extern "C" void __imp__XamLoaderTerminateTitle(PPCContext& ctx, uint8_t* base);
