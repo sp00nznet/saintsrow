@@ -120,11 +120,27 @@ extern "C" void __imp__sub_82186F08(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82648ED8) {
     static int count = 0;
     count++;
-    FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-    if (hf) { fprintf(hf, "[TICK-648ED8] #%d ENTER r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
+    if (count <= 10) {
+        FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+        if (hf) { fprintf(hf, "[TICK-648ED8] #%d ENTER r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
+    }
     __imp__sub_82648ED8(ctx, base);
-    hf = fopen("saintsrow_heartbeat.log", "a");
-    if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X\n", count, ctx.r3.u32); fclose(hf); }
+
+    // Prevent state from becoming 3 (exit) to keep the game in the main loop
+    // State variable at 0x8390DD7C: force it back to non-3
+    uint32_t state = PPC_LOAD_U32(0x8390DD7C);
+    if (state == 3 && count < 1000) {
+        PPC_STORE_U32(0x8390DD7C, 0);  // Reset to 0 = keep running
+        static int reset_count = 0;
+        if (++reset_count <= 5) {
+            FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+            if (hf) { fprintf(hf, "[STATE-RESET] state was 3, reset to 0 at tick %d\n", count); fclose(hf); }
+        }
+    }
+    if (count <= 10) {
+        FILE* hf = fopen("saintsrow_heartbeat.log", "a");
+        if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X state=%u\n", count, ctx.r3.u32, PPC_LOAD_U32(0x8390DD7C)); fclose(hf); }
+    }
 }
 
 // Trace each sub-call in the main game loop (sub_82186F08)
