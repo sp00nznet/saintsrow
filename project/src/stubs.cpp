@@ -55,6 +55,37 @@ extern "C" void XamUserGetSigninInfo_entry(
 // Only stub the worker thread (needs special handling).
 // ============================================================================
 
+// Trace key Bink functions to understand video render flow
+extern "C" void __imp__sub_82789600(PPCContext& ctx, uint8_t* base); // BinkDoFrame
+extern "C" void __imp__sub_82789658(PPCContext& ctx, uint8_t* base); // BinkWait
+extern "C" void __imp__sub_82789EE8(PPCContext& ctx, uint8_t* base); // BinkOpen
+PPC_FUNC(sub_82789600) { // BinkDoFrame
+    static int c = 0;
+    if (++c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkDoFrame #%d] handle=0x%08X\n", c, ctx.r3.u32); fclose(f); } }
+    __imp__sub_82789600(ctx, base);
+    if (c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkDoFrame #%d] returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); } }
+}
+PPC_FUNC(sub_82789658) { // BinkWait
+    static int c = 0;
+    __imp__sub_82789658(ctx, base);
+    if (++c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkWait #%d] returned r3=%u\n", c, ctx.r3.u32); fclose(f); } }
+}
+PPC_FUNC(sub_82789EE8) { // BinkOpen
+    static int c = 0;
+    if (++c <= 5) {
+        char fn[256] = {0};
+        for (int i = 0; i < 255; i++) { fn[i] = (char)PPC_LOAD_U8(ctx.r3.u32 + i); if (!fn[i]) break; }
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkOpen #%d] '%s'\n", c, fn); fclose(f); }
+    }
+    __imp__sub_82789EE8(ctx, base);
+    if (c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkOpen #%d] returned handle=0x%08X\n", c, ctx.r3.u32); fclose(f); } }
+}
+
 // Bink worker thread - let it run for real now
 // (previously stubbed to idle, but Bink needs it for video transitions)
 
@@ -146,6 +177,15 @@ PPC_FUNC(sub_822827B0) {
     }
 }
 TRACE_STATE("VideoMgr", 821FB9D8)
+// VideoDriver - trace every call unconditionally
+extern "C" void __imp__sub_821FBD10(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821FBD10) {
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[VideoDriver] ENTER r19=0x%08X\n", ctx.r19.u32); fclose(f); }
+    __imp__sub_821FBD10(ctx, base);
+    f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[VideoDriver] EXIT\n"); fclose(f); }
+}
 TRACE_STATE("RenderA", 826365E0)
 TRACE_STATE("RenderB", 8263DE08)
 TRACE_STATE("RenderC", 8263DD80)
@@ -202,16 +242,18 @@ PPC_FUNC(sub_82604C10) {
 }
 TRACE_CALL("CreateThr", 82716028)
 TRACE_CALL("WaitThr", 82716038)
-// sub_82185498 - run it for real (VEH handles null vtable crashes)
-// Also clear loading flag so wait loop reaches GameLoop2
-extern "C" void __imp__sub_82185498(PPCContext& ctx, uint8_t* base);
+// sub_82185498 (PostLoop5) - stub it + clear loading flag
+// Running it for real crashes fatally. Stub and proceed to GameLoop2.
 PPC_FUNC(sub_82185498) {
-    static int c = 0; c++;
-    if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[PostLoop5] RUNNING #%d\n", c); fclose(f); } }
-    __imp__sub_82185498(ctx, base);
-    if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[PostLoop5] DONE #%d\n", c); fclose(f); } }
+    // Clear load flag so wait loop runs → reaches GameLoop2
+    // Need to also clear after return because the code between PostLoop5
+    // and the flag check might re-set it
+    PPC_STORE_U8(0x8370D6C9, 0);
+    uint8_t flag_val = PPC_LOAD_U8(0x8370D6C9);
+    static int c = 0;
+    if (++c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[PostLoop5] STUBBED #%d flag=0x%02X r30=0x%08X\n", c, flag_val, ctx.r30.u32); fclose(f); } }
+    ctx.r3.u64 = 0;
 }
 #undef TRACE_CALL
 
@@ -264,7 +306,18 @@ PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
 // The game waits for [0x8370D6C9] to become non-zero, but the loading
 // pipeline doesn't complete due to stubbed subsystems. Force it after
 // a short delay to let the game proceed.
-// sub_82716020 - no longer forcing load flag, let natural loading work
+// sub_82716020 - force loading complete flag after a few calls
+extern "C" void __imp__sub_82716020(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82716020) {
+    static int call_count = 0;
+    call_count++;
+    __imp__sub_82716020(ctx, base);
+    if (call_count == 5) {
+        PPC_STORE_U8(0x8370D6C9, 1);
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[FORCE-FLAG] Set at 0x8370D6C9 after %d calls\n", call_count); fclose(f); }
+    }
+}
 
 // Override XamInputGetState to report a connected gamepad for user 0
 // Without this, the game detects "no controller" and skips rendering
