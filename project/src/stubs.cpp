@@ -189,6 +189,18 @@ PPC_FUNC(sub_821FBD10) {
 TRACE_STATE("RenderA", 826365E0)
 TRACE_STATE("RenderB", 8263DE08)
 TRACE_STATE("RenderC", 8263DD80)
+// GL2_Render with detailed state check
+extern "C" void __imp__sub_8262FFE0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8262FFE0) {
+    uint32_t skip_flag = PPC_LOAD_U32(0x8372033C);
+    uint32_t render_skip = PPC_LOAD_U32(0x83720340);
+    static int _c = 0; _c++;
+    if (_c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GL2_Render #%d] skip=%u render_skip=%u\n", _c, skip_flag, render_skip); fclose(f); }
+    }
+    __imp__sub_8262FFE0(ctx, base);
+}
 TRACE_STATE("RenderD", 82636688)
 #undef TRACE_STATE
 TRACE_CALL("BinkClean", 821FB070)
@@ -215,7 +227,7 @@ TRACE_CALL("GL2_Init2", 8220E5E0)
 TRACE_CALL("GL2_Func1", 8216E338)
 TRACE_CALL("GL2_Func2", 821700F0)
 TRACE_CALL("GL2_Func3", 8220FD60)
-TRACE_CALL("GL2_Render", 8262FFE0)
+// GL2_Render hooked above with skip_flag check
 TRACE_CALL("GL2_Timer", 82717EC8)
 // sub_8234C1C0 = physics update - crashes without proper world data
 PPC_FUNC(sub_8234C1C0) {
@@ -319,20 +331,8 @@ PPC_FUNC(sub_82716020) {
     }
 }
 
-// Override XamInputGetState to report a connected gamepad for user 0
-// Without this, the game detects "no controller" and skips rendering
-extern "C" void __imp__XamInputGetState(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82788EC4) {
-    uint32_t user_index = ctx.r3.u32;
-    // Call real implementation first (handles keyboard input mapping)
-    __imp__XamInputGetState(ctx, base);
-    // If it returned "not connected" for user 0, override to "connected"
-    if (user_index == 0 && ctx.r3.u32 != 0) {
-        ctx.r3.u64 = 0;  // X_ERROR_SUCCESS = device connected
-        // The input_state struct at r5 was zeroed by the SDK on failure
-        // A zeroed state means "connected but no buttons pressed" which is fine
-    }
-}
+// XamInputGetState - let real input system handle it
+// (previously faked connected, but render path uses disconnected state)
 
 // Hook XamLoaderTerminateTitle to catch game exits
 extern "C" void __imp__XamLoaderTerminateTitle(PPCContext& ctx, uint8_t* base);
