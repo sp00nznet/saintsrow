@@ -130,26 +130,9 @@ PPC_FUNC(sub_825E54A8) {
     __imp__sub_825E54A8(ctx, base);
 }
 
-// Hook the render wait thread to force the render flag
+// Render wait thread - run naturally
 extern "C" void __imp__sub_825DF970(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825DF970) {
-    // Find r31 through the pointer chain: r31 = [[0x82800658]]
-    uint32_t ptr1 = PPC_LOAD_U32(0x82800658);
-    uint32_t r31_val = ptr1 ? PPC_LOAD_U32(ptr1) : 0;
-    FILE* f = fopen("saintsrow_heartbeat.log", "a");
-    if (f) { fprintf(f, "[RENDER-WAIT] ptr=0x%08X r31=0x%08X\n", ptr1, r31_val); fclose(f); }
-
-    // removed test pattern
-
-    // Force the render flag at [r31+10810] |= 0x4
-    if (r31_val) {
-        uint8_t flag = PPC_LOAD_U8(r31_val + 10810);
-        PPC_STORE_U8(r31_val + 10810, flag | 0x4);
-        f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[RENDER-WAIT] forced flag 0x%02X -> 0x%02X at 0x%08X\n",
-            flag, flag | 0x4, r31_val + 10810); fclose(f); }
-    }
-
     __imp__sub_825DF970(ctx, base);
 }
 
