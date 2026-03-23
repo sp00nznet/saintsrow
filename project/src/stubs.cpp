@@ -158,7 +158,28 @@ PPC_FUNC(sub_82648ED8) {
         } \
     }
 
-TRACE_STATE("GameUpdate", 822827B0)
+// GameUpdate - the loading state machine
+// Internal state at 0x8371DD7C controls loading flow:
+//   0 = uninitialized (default: skips to done, sets main=3)
+//   1 = loading phase 1
+//   2 = loading phase 2 (checking completion)
+//   3 = loading complete
+// When internal_state=0, the function immediately exits to state 3 (done).
+// Force internal_state to 2 on first call to enter the loading flow.
+extern "C" void __imp__sub_822827B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822827B0) {
+    static int _c = 0; _c++;
+    uint32_t internal_state = PPC_LOAD_U32(0x8371DD7C);
+    // Internal state 0 means uninitialized - game immediately transitions to done.
+    // Let it transition naturally to GameLoop2.
+    __imp__sub_822827B0(ctx, base);
+    if (_c <= 10) {
+        uint32_t new_i = PPC_LOAD_U32(0x8371DD7C);
+        uint32_t new_m = PPC_LOAD_U32(0x8370DD7C);
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GameUpdate #%d] internal=%u main=%u\n", _c, new_i, new_m); fclose(f); }
+    }
+}
 TRACE_STATE("VideoMgr", 821FB9D8)
 TRACE_STATE("RenderA", 826365E0)
 TRACE_STATE("RenderB", 8263DE08)
