@@ -618,14 +618,47 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                 uint32_t cur_pos = PPC_LOAD_U32(render_state + 40);
                 uint32_t rb_base_virt = PPC_LOAD_U32(render_state + 13436);
                 static int dbg_wp = 0;
-                if (++dbg_wp <= 5) {
+                if (++dbg_wp <= 3) {
+                    // Dump first 16 dwords of ring buffer to understand packet format
+                    uint32_t rb_sec = PPC_LOAD_U32(render_state + 13440);
                     FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
-                    if (f2) { fprintf(f2, "[WP-Debug #%d] cur_pos=0x%08X rb_base=0x%08X desc=0x%08X desc[0]=0x%08X desc[4]=0x%08X\n",
-                        dbg_wp, cur_pos, rb_base_virt, desc, PPC_LOAD_U32(desc), PPC_LOAD_U32(desc+4)); fclose(f2); }
+                    if (f2) {
+                        // Check if physical and virtual map to same host address
+                    auto* mem = ks->memory();
+                    uint8_t* virt_host = base + rb_sec;
+                    uint8_t* phys_host = mem->TranslatePhysical(0x095F0000);
+                    fprintf(f2, "[WP-Debug #%d] cur_pos=0x%08X rb_sec=0x%08X virt_host=%p phys_host=%p same=%d\n",
+                        dbg_wp, cur_pos, rb_sec, (void*)virt_host, (void*)phys_host, virt_host == phys_host);
+                        // Read first 16 dwords from the ring buffer using host memory
+                        uint8_t* rb_host = base + rb_sec;
+                        fprintf(f2, "  rb_host[0..7]: ");
+                        for (int i = 0; i < 8; i++) {
+                            uint32_t val;
+                            memcpy(&val, rb_host + i*4, 4);
+                            fprintf(f2, "%08X ", val);
+                        }
+                        fprintf(f2, "\n  rb_ppc[0..7]: ");
+                        for (int i = 0; i < 8; i++) fprintf(f2, "%08X ", PPC_LOAD_U32(rb_sec + i*4));
+                        fprintf(f2, "\n");
+                        fclose(f2);
+                    }
                 }
                 // Use the SECONDARY ring buffer base (0xA95F0000 from [13440])
                 uint32_t rb_secondary = PPC_LOAD_U32(render_state + 13440);
                 if (rb_secondary && cur_pos >= rb_secondary) {
+                    // Copy ring buffer data from virtual to physical memory
+                    // Virtual and physical mappings are at different host addresses,
+                    // so the CP can't read what PPC wrote to virtual memory.
+                    uint32_t rb_phys_addr = 0x095F0000; // physical addr of 0xA95F0000
+                    uint8_t* src = base + rb_secondary; // virtual host address
+                    auto* mem = ks->memory();
+                    uint8_t* dst = mem->TranslatePhysical(rb_phys_addr); // physical host address
+                    uint32_t copy_len = cur_pos - rb_secondary + 256; // include VdSwap data
+                    if (copy_len > 0x2C0000) copy_len = 0x2C0000; // cap to ring buffer size
+                    // Commit the physical pages first (they might not be committed)
+                    VirtualAlloc(dst, copy_len, MEM_COMMIT, PAGE_READWRITE);
+                    memcpy(dst, src, copy_len);
+
                     uint32_t write_idx = (cur_pos - rb_secondary) / 4;
                     cp->UpdateWritePointer(write_idx);
 
