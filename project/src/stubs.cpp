@@ -476,6 +476,61 @@ PPC_FUNC(sub_82716020) {
     }
 }
 
+// Hook GPU ring buffer init function to trace why VdInitializeRingBuffer is never called
+extern "C" void __imp__sub_825D3DA8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825D3DA8) {
+    uint32_t r31 = ctx.r3.u32; // first arg = render state
+    uint32_t r26_arg = ctx.r4.u32; // second arg = ring buffer config (r26 inside function)
+    uint32_t rb_10780 = PPC_LOAD_U32(r31 + 10780);
+    uint32_t rb_13504 = PPC_LOAD_U32(r31 + 13504);
+    // Check what r26 (r4) points to - this controls ring buffer allocation
+    uint32_t r26_v4 = r26_arg ? PPC_LOAD_U32(r26_arg + 4) : 0;
+    uint32_t r26_v8 = r26_arg ? PPC_LOAD_U32(r26_arg + 8) : 0;
+    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[RB-Init] ENTER r3=0x%08X r4=0x%08X [10780]=%u [13504]=0x%08X r4[4]=0x%08X r4[8]=0x%08X\n",
+        r31, r26_arg, rb_10780, rb_13504, r26_v4, r26_v8); fclose(f); }
+    __imp__sub_825D3DA8(ctx, base);
+    uint32_t ret = ctx.r3.u32;
+    uint32_t rb_10772 = PPC_LOAD_U32(r31 + 10772);
+    uint32_t rb_10768 = PPC_LOAD_U32(r31 + 10768);
+    uint32_t rb_13436 = PPC_LOAD_U32(r31 + 13436);
+    uint32_t rb_13440 = PPC_LOAD_U32(r31 + 13440);
+    f = fopen("saintsrow_heartbeat.log", "a");
+    if (f) { fprintf(f, "[RB-Init] EXIT ret=%u [10780]=%u [10772]=0x%08X [10768]=0x%08X [13436]=0x%08X [13440]=0x%08X\n",
+        ret, PPC_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
+
+    // The game has TWO ring buffers:
+    //   [13436] = 0xE98B7000 (primary, for setup/control)
+    //   [13440] = 0xA95F0000 (secondary, actual rendering + VdSwap)
+    // We need to init the command processor with the SECONDARY buffer
+    // because that's where rendering commands and VdSwap packets go.
+    if (rb_13440 != 0) {
+        auto* ks = REX_KERNEL_STATE();
+        auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
+        auto* cp = gs->command_processor();
+
+        uint32_t rb_phys = ks->memory()->GetPhysicalAddress(rb_13440);
+        if (rb_phys != UINT32_MAX) {
+            // Ring buffer at 0xA95F0000 with size 0x2C0000 (2.75MB)
+            // size_log2 = 18 (2^21 = 2MB ring buffer)
+            int size_log2 = 18;
+            cp->InitializeRingBuffer(rb_phys, size_log2);
+
+            // Enable read pointer writeback
+            if (rb_10768) {
+                uint32_t rptr_wb = ks->memory()->GetPhysicalAddress(rb_10768);
+                if (rptr_wb != UINT32_MAX) {
+                    cp->EnableReadPointerWriteBack(rptr_wb, 6);
+                }
+            }
+
+            f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[RB-Init] MANUAL InitRB secondary rb_virt=0x%08X rb_phys=0x%08X size_log2=%d\n",
+                rb_13440, rb_phys, size_log2); fclose(f); }
+        }
+    }
+}
+
 // VdSwap override - intercept the actual SDK import symbol
 // The recompiled code calls __imp__VdSwap directly, NOT through sub_827889E4
 // Use PPC_FUNC_IMPL to define the extern "C" symbol that the recompiled code calls
@@ -547,19 +602,46 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
             fetch[i] = PPC_LOAD_U32(buf_addr + 4 + i*4);
         }
 
-        // Ensure the ring buffer is initialized so the worker thread is alive
-        static bool rb_inited = false;
-        if (!rb_inited) {
-            // Use a dummy ring buffer - just need the worker thread to be active
-            // for processing CallInThread functions
-            uint32_t buf_phys = ks->memory()->GetPhysicalAddress(buf_addr);
-            if (buf_phys != UINT32_MAX) {
-                cp->InitializeRingBuffer(buf_phys, 10);
-                rb_inited = true;
+        // Before issuing swap, feed the current ring buffer write pointer
+        // to the command processor. The game writes the write pointer to
+        // [render_state+10768] (descriptor area) but this doesn't reach
+        // the GPU command processor because it's not MMIO-mapped.
+        // Read the write pointer and call UpdateWritePointer to process
+        // all pending rendering commands in the ring buffer.
+        {
+            uint32_t render_state = 0x40001E00;
+            uint32_t desc = PPC_LOAD_U32(render_state + 10768);
+            if (desc) {
+                // The game writes [desc+0] = writeback data, [desc+4] = write ptr value
+                // Actually the descriptor format may differ. Let's check [render_state+40]
+                // which is where the current ring buffer position is stored.
+                uint32_t cur_pos = PPC_LOAD_U32(render_state + 40);
+                uint32_t rb_base_virt = PPC_LOAD_U32(render_state + 13436);
+                static int dbg_wp = 0;
+                if (++dbg_wp <= 5) {
+                    FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
+                    if (f2) { fprintf(f2, "[WP-Debug #%d] cur_pos=0x%08X rb_base=0x%08X desc=0x%08X desc[0]=0x%08X desc[4]=0x%08X\n",
+                        dbg_wp, cur_pos, rb_base_virt, desc, PPC_LOAD_U32(desc), PPC_LOAD_U32(desc+4)); fclose(f2); }
+                }
+                // Use the SECONDARY ring buffer base (0xA95F0000 from [13440])
+                uint32_t rb_secondary = PPC_LOAD_U32(render_state + 13440);
+                if (rb_secondary && cur_pos >= rb_secondary) {
+                    uint32_t write_idx = (cur_pos - rb_secondary) / 4;
+                    cp->UpdateWritePointer(write_idx);
+
+                    static int wp_c = 0;
+                    if (++wp_c <= 10) {
+                        FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
+                        if (f2) { fprintf(f2, "[VdSwap-WP #%d] pos=0x%08X base=0x%08X idx=%u\n",
+                            wp_c, cur_pos, rb_base_virt, write_idx); fclose(f2); }
+                    }
+                }
             }
         }
 
         // Write fetch constants and issue swap on command processor thread
+        // CallInThread signals the worker event, so the worker thread will
+        // wake up even without InitializeRingBuffer being called.
         static int swap_call = 0;
         int this_call = ++swap_call;
         cp->CallInThread([cp, fb_phys, width, height, fetch, this_call]() {
