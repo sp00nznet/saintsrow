@@ -7,6 +7,9 @@
 
 #include <rex/logging.h>
 #include <rex/system/kernel_state.h>
+#include <rex/graphics/graphics_system.h>
+#include <rex/graphics/command_processor.h>
+#include <rex/runtime.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -112,22 +115,55 @@ PPC_FUNC(sub_825E5320) {
 // r31 comes from [[0x82800658]] (same as render wait thread)
 extern "C" void __imp__sub_825E54A8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825E54A8) {
-    // Force all rendering flags:
-    // r31 = r3 = render state object
+    // Force ALL rendering flags to get VdSwap called AND ring buffer kicked:
     uint32_t r31_val = ctx.r3.u32;
     if (r31_val) {
-        // Clear skip-VdSwap flag [r31+19980]
-        PPC_STORE_U32(r31_val + 19980, 0);
-        // Set dirty-frame flag [r31+20424] |= 0x8
+        PPC_STORE_U32(r31_val + 19980, 0);    // skip flag = 0 (gates VdSwap call)
         uint8_t dirty = PPC_LOAD_U8(r31_val + 20424);
-        PPC_STORE_U8(r31_val + 20424, dirty | 0x8);
-        static int fc = 0;
-        if (++fc <= 5) {
+        PPC_STORE_U8(r31_val + 20424, dirty | 0x8);  // dirty flag (gates render sub calls)
+        // Force frame counter at [r31+20080] to non-zero (gates buffer queue setup)
+        uint32_t fc = PPC_LOAD_U32(r31_val + 20080);
+        if (fc == 0) {
+            PPC_STORE_U32(r31_val + 20080, 1);
+        }
+        // Set "direct write" bit at [r31+10809] |= 0x2
+        // This gates the CP_RB_WPTR write in sub_825D3580 (ring buffer kick)
+        // Without this, VdSwap writes packets but GPU never processes them
+        uint8_t dw = PPC_LOAD_U8(r31_val + 10809);
+        PPC_STORE_U8(r31_val + 10809, dw | 0x2);
+        static int logc = 0;
+        if (++logc <= 5) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
-            if (f) { fprintf(f, "[VdSwap-Fix #%d] forced dirty=0x%02X skip=0 at r31=0x%08X\n", fc, dirty|0x8, r31_val); fclose(f); }
+            if (f) { fprintf(f, "[VdSwap-Fix #%d] skip=0 dirty=0x%02X fc=%u dw=0x%02X\n", logc, dirty|0x8, fc, dw|0x2); fclose(f); }
         }
     }
+    // Log state JUST before calling real function
+    if (r31_val) {
+        uint32_t skip_val = PPC_LOAD_U32(r31_val + 19980);
+        uint32_t fc_val = PPC_LOAD_U32(r31_val + 20080);
+        uint8_t dirty_val = PPC_LOAD_U8(r31_val + 20424);
+        uint32_t q1 = PPC_LOAD_U32(r31_val + 20072);
+        uint32_t q2 = PPC_LOAD_U32(r31_val + 20076);
+        static int pre = 0;
+        if (++pre <= 10) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[Pre-Call #%d] skip=%u fc=%u dirty=0x%02X q1=%u q2=%u r3=0x%08X\n",
+                pre, skip_val, fc_val, dirty_val, q1, q2, r31_val); fclose(f); }
+        }
+    }
+
     __imp__sub_825E54A8(ctx, base);
+
+    // After: check if VdSwap was reached
+    if (r31_val) {
+        uint32_t rb_ptr = PPC_LOAD_U32(r31_val + 40);
+        uint32_t skip_after = PPC_LOAD_U32(r31_val + 19980);
+        static int pc = 0;
+        if (++pc <= 10) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[Post-Call #%d] rb_ptr=0x%08X skip_after=%u\n", pc, rb_ptr, skip_after); fclose(f); }
+        }
+    }
 }
 
 // Render wait thread - run naturally
@@ -440,17 +476,115 @@ PPC_FUNC(sub_82716020) {
     }
 }
 
-// Trace VdSwap - the frame present function
-extern "C" void __imp__VdSwap(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_827889E4) {
+// VdSwap override - intercept the actual SDK import symbol
+// The recompiled code calls __imp__VdSwap directly, NOT through sub_827889E4
+// Use PPC_FUNC_IMPL to define the extern "C" symbol that the recompiled code calls
+// The linker's /force:multiple flag lets us override the SDK's definition
+//
+// VdSwap_entry takes 10 args via HostToGuestFunction:
+//   r3=buffer_ptr, r4=fetch_ptr, r5=unk2, r6=unk3, r7=unk4,
+//   r8=frontbuffer_ptr, r9=texture_format_ptr, r10=color_space_ptr,
+//   stack[0]=width, stack[1]=height
+//
+// We need to call the SDK's actual VdSwap_entry. Since we override __imp__VdSwap,
+// we'll call VdSwap_entry directly via HostToGuestFunction.
+#include <rex/ppc/function.h>
+namespace rex { namespace kernel { namespace xboxkrnl {
+    extern void VdSwap_entry(ppc_pvoid_t, ppc_pvoid_t, ppc_pvoid_t, ppc_pvoid_t,
+        ppc_pvoid_t, ppc_pu32_t, ppc_pu32_t, ppc_pu32_t, ppc_pu32_t, ppc_pu32_t);
+}}}
+
+PPC_FUNC_IMPL(__imp__VdSwap) {
     static int c = 0;
-    if (++c <= 10) {
+    if (++c <= 20) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[VdSwap #%d] buf=0x%08X fetch=0x%08X fb=0x%08X w=%u h=%u\n",
-            c, ctx.r3.u32, ctx.r4.u32, ctx.r8.u32,
-            PPC_LOAD_U32(ctx.r8.u32 + 12), PPC_LOAD_U32(ctx.r8.u32 + 16)); fclose(f); }
+        if (f) {
+            fprintf(f, "[VdSwap INTERCEPTED #%d] r3=0x%08X r4=0x%08X r5=0x%08X r6=0x%08X r7=0x%08X r8=0x%08X r9=0x%08X r10=0x%08X\n",
+                c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32, ctx.r9.u32, ctx.r10.u32);
+            // Dump fetch constant at r4 (6 dwords)
+            if (ctx.r4.u32) {
+                uint32_t f0 = PPC_LOAD_U32(ctx.r4.u32), f1 = PPC_LOAD_U32(ctx.r4.u32+4);
+                uint32_t f2 = PPC_LOAD_U32(ctx.r4.u32+8), f3 = PPC_LOAD_U32(ctx.r4.u32+12);
+                fprintf(f, "  fetch[0..3]=%08X %08X %08X %08X\n", f0, f1, f2, f3);
+                // base_address is in fetch dword 0 bits [31:12] (or similar)
+                fprintf(f, "  fetch.base_addr_raw = 0x%08X (<<12 = 0x%08X)\n", f0 >> 12, (f0 >> 12) << 12);
+            }
+            // Dump frontbuffer ptr at r8
+            if (ctx.r8.u32) {
+                fprintf(f, "  *frontbuffer_ptr = 0x%08X\n", PPC_LOAD_U32(ctx.r8.u32));
+            }
+            fclose(f);
+        }
     }
-    __imp__VdSwap(ctx, base);
+    // Save buffer_ptr before call to check what VdSwap writes
+    uint32_t buf_addr = ctx.r3.u32;
+
+    // Call the real SDK implementation
+    rex::HostToGuestFunction<rex::kernel::xboxkrnl::VdSwap_entry>(ctx, base);
+
+    // After VdSwap writes packets to ring buffer, we need to kick the
+    // command processor. The game's ring buffer init (sub_825DAB58) is never
+    // called, so VdInitializeRingBuffer never fires. We must:
+    // 1. Initialize the ring buffer on first call
+    // 2. Update the write pointer after each VdSwap
+    {
+        auto* ks = REX_KERNEL_STATE();
+        auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
+        auto* cp = gs->command_processor();
+
+        // Bypass the ring buffer entirely and call IssueSwap directly.
+        // VdSwap wrote the swap packet with:
+        //   frontbuffer physical address = 0x09258000 (from buf[9])
+        //   width = 1280, height = 720 (from buf[10], buf[11])
+        // Also write the fetch constant to GPU register file first.
+        uint32_t fb_phys = PPC_LOAD_U32(buf_addr + 36); // buf[9] = frontbuffer phys
+        uint32_t width = PPC_LOAD_U32(buf_addr + 40);   // buf[10]
+        uint32_t height = PPC_LOAD_U32(buf_addr + 44);  // buf[11]
+
+        // Read the fetch constant data (6 dwords after the Type0 header)
+        uint32_t fetch[6];
+        for (int i = 0; i < 6; i++) {
+            fetch[i] = PPC_LOAD_U32(buf_addr + 4 + i*4);
+        }
+
+        // Ensure the ring buffer is initialized so the worker thread is alive
+        static bool rb_inited = false;
+        if (!rb_inited) {
+            // Use a dummy ring buffer - just need the worker thread to be active
+            // for processing CallInThread functions
+            uint32_t buf_phys = ks->memory()->GetPhysicalAddress(buf_addr);
+            if (buf_phys != UINT32_MAX) {
+                cp->InitializeRingBuffer(buf_phys, 10);
+                rb_inited = true;
+            }
+        }
+
+        // Write fetch constants and issue swap on command processor thread
+        static int swap_call = 0;
+        int this_call = ++swap_call;
+        cp->CallInThread([cp, fb_phys, width, height, fetch, this_call]() {
+            FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
+            if (f2 && this_call <= 10) { fprintf(f2, "[IssueSwap-Thread #%d] ENTER fb=0x%08X %ux%u\n", this_call, fb_phys, width, height); fclose(f2); }
+
+            // Write fetch constant 0 (registers 0x4800-0x4805)
+            cp->RestoreRegisters(0x4800, fetch, 6, true);
+
+            f2 = fopen("saintsrow_heartbeat.log", "a");
+            if (f2 && this_call <= 10) { fprintf(f2, "[IssueSwap-Thread #%d] fetch written, calling IssueSwap\n", this_call); fclose(f2); }
+
+            cp->IssueSwap(fb_phys, width, height);
+
+            f2 = fopen("saintsrow_heartbeat.log", "a");
+            if (f2 && this_call <= 10) { fprintf(f2, "[IssueSwap-Thread #%d] IssueSwap returned\n", this_call); fclose(f2); }
+        });
+
+        static int kick_c = 0;
+        if (++kick_c <= 10) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[VdSwap-Kick #%d] IssueSwap fb=0x%08X %ux%u\n",
+                kick_c, fb_phys, width, height); fclose(f); }
+        }
+    }
 }
 
 // Trace GPU command buffer writer

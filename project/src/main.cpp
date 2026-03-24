@@ -283,6 +283,12 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
             // Fall through to the instruction decoder below
             goto null_page_handler;
         }
+        // Don't demand-page the GPU MMIO range (0x7FC80000-0x7FCFFFFF)
+        // The SDK maps this with PAGE_NOACCESS so access violations trigger
+        // the MMIO handler for GPU register reads/writes (CP_RB_WPTR etc.)
+        if (guest_addr >= 0x7FC80000 && guest_addr < 0x7FD00000) {
+            return EXCEPTION_CONTINUE_SEARCH;  // Let SDK's MMIO handler process it
+        }
         // Commit the page on demand (4KB aligned)
         void* page_addr = (void*)(fault_addr & ~0xFFFull);
         void* result = VirtualAlloc(page_addr, 0x10000, MEM_COMMIT, PAGE_READWRITE);
