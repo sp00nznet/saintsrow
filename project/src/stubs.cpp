@@ -500,20 +500,21 @@ PPC_FUNC(sub_825D3DA8) {
         ret, PPC_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
 
     // The game has TWO ring buffers:
-    //   [13436] = 0xE98B7000 (primary, for setup/control)
-    //   [13440] = 0xA95F0000 (secondary, actual rendering + VdSwap)
-    // We need to init the command processor with the SECONDARY buffer
-    // because that's where rendering commands and VdSwap packets go.
-    if (rb_13440 != 0) {
+    //   [13436] = 0xE98B7000 (primary PM4 ring buffer for GPU)
+    //   [13440] = 0xA95F0000 (secondary game command buffer)
+    // The PRIMARY buffer contains actual PM4 packets for the GPU.
+    // The game's flush code (sub_825D3660) copies PM4 data from the
+    // secondary buffer to the primary buffer and kicks the GPU.
+    if (rb_13436 != 0) {
         auto* ks = REX_KERNEL_STATE();
         auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
         auto* cp = gs->command_processor();
 
-        uint32_t rb_phys = ks->memory()->GetPhysicalAddress(rb_13440);
+        uint32_t rb_phys = ks->memory()->GetPhysicalAddress(rb_13436);
         if (rb_phys != UINT32_MAX) {
-            // Ring buffer at 0xA95F0000 with size 0x2C0000 (2.75MB)
-            // size_log2 = 18 (2^21 = 2MB ring buffer)
-            int size_log2 = 18;
+            // Primary ring buffer at 0xE98B7000, size 0x8000 (32KB default)
+            // size_log2 = 12 (2^15 = 32KB)
+            int size_log2 = 12;
             cp->InitializeRingBuffer(rb_phys, size_log2);
 
             // Enable read pointer writeback
@@ -643,23 +644,28 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                         fclose(f2);
                     }
                 }
-                // Use the SECONDARY ring buffer base (0xA95F0000 from [13440])
-                uint32_t rb_secondary = PPC_LOAD_U32(render_state + 13440);
-                if (rb_secondary && cur_pos >= rb_secondary) {
-                    // Copy ring buffer data from virtual to physical memory
-                    // Virtual and physical mappings are at different host addresses,
-                    // so the CP can't read what PPC wrote to virtual memory.
-                    uint32_t rb_phys_addr = 0x095F0000; // physical addr of 0xA95F0000
-                    uint8_t* src = base + rb_secondary; // virtual host address
-                    auto* mem = ks->memory();
-                    uint8_t* dst = mem->TranslatePhysical(rb_phys_addr); // physical host address
-                    uint32_t copy_len = cur_pos - rb_secondary + 256; // include VdSwap data
-                    if (copy_len > 0x2C0000) copy_len = 0x2C0000; // cap to ring buffer size
-                    // Commit the physical pages first (they might not be committed)
-                    VirtualAlloc(dst, copy_len, MEM_COMMIT, PAGE_READWRITE);
-                    memcpy(dst, src, copy_len);
+                // The primary ring buffer is at [13436]. The game's flush code
+                // writes PM4 data there. We need to sync it to physical memory
+                // and update the write pointer.
+                // [r31+10780] tracks the primary ring buffer write offset in entries
+                uint32_t rb_primary = PPC_LOAD_U32(render_state + 13436);
+                uint32_t rb_10780 = PPC_LOAD_U32(render_state + 10780);
+                if (rb_primary && rb_10780 > 0) {
+                    // Copy primary ring buffer from virtual to physical
+                    uint32_t rb_phys_addr = ks->memory()->GetPhysicalAddress(rb_primary);
+                    if (rb_phys_addr != UINT32_MAX) {
+                        uint8_t* src = base + rb_primary;
+                        uint8_t* dst = ks->memory()->TranslatePhysical(rb_phys_addr);
+                        uint32_t copy_len = rb_10780 * 8; // entries are 8 bytes each
+                        if (copy_len > 0x8000) copy_len = 0x8000;
+                        VirtualAlloc(dst, copy_len + 0x1000, MEM_COMMIT, PAGE_READWRITE);
+                        memcpy(dst, src, copy_len);
+                    }
 
-                    uint32_t write_idx = (cur_pos - rb_secondary) / 4;
+                    // Update write pointer based on the primary buffer's tracked position
+                    // The primary buffer descriptor at [10768] tracks the current write position
+                    // [10780] = entries count, each entry = 2 dwords (8 bytes)
+                    uint32_t write_idx = rb_10780 * 2; // convert entries to dwords
                     cp->UpdateWritePointer(write_idx);
 
                     static int wp_c = 0;
