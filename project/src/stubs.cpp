@@ -499,12 +499,10 @@ PPC_FUNC(sub_825D3DA8) {
     if (f) { fprintf(f, "[RB-Init] EXIT ret=%u [10780]=%u [10772]=0x%08X [10768]=0x%08X [13436]=0x%08X [13440]=0x%08X\n",
         ret, PPC_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
 
-    // The game has TWO ring buffers:
-    //   [13436] = 0xE98B7000 (primary PM4 ring buffer for GPU)
-    //   [13440] = 0xA95F0000 (secondary game command buffer)
-    // The PRIMARY buffer contains actual PM4 packets for the GPU.
-    // The game's flush code (sub_825D3660) copies PM4 data from the
-    // secondary buffer to the primary buffer and kicks the GPU.
+    // Initialize the GPU command processor ring buffer.
+    // The PRIMARY buffer at [13436]=0xE98B7000 contains actual PM4 packets
+    // written by the game's flush function (sub_825D3660/sub_825D3580).
+    // Physical mapping shares the same file-backed pages as virtual.
     if (rb_13436 != 0) {
         auto* ks = REX_KERNEL_STATE();
         auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
@@ -512,7 +510,7 @@ PPC_FUNC(sub_825D3DA8) {
 
         uint32_t rb_phys = ks->memory()->GetPhysicalAddress(rb_13436);
         if (rb_phys != UINT32_MAX) {
-            // Primary ring buffer at 0xE98B7000, size 0x8000 (32KB default)
+            // Primary ring buffer at 0xE98B7000, size 0x8000 (32KB)
             // size_log2 = 12 (2^15 = 32KB)
             int size_log2 = 12;
             cp->InitializeRingBuffer(rb_phys, size_log2);
@@ -603,6 +601,17 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
             fetch[i] = PPC_LOAD_U32(buf_addr + 4 + i*4);
         }
 
+        // Force a ring buffer flush before issuing swap.
+        // The game's flush function (sub_825D3660) translates game commands
+        // from the secondary buffer into PM4 packets in the primary buffer.
+        // Call it directly to ensure rendering commands are processed.
+        {
+            extern void sub_825D3660(PPCContext& ctx, uint8_t* base);
+            PPCContext flush_ctx = ctx;
+            flush_ctx.r3.u64 = 0x40001E00; // render state object
+            sub_825D3660(flush_ctx, base);
+        }
+
         // Before issuing swap, feed the current ring buffer write pointer
         // to the command processor. The game writes the write pointer to
         // [render_state+10768] (descriptor area) but this doesn't reach
@@ -620,27 +629,26 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                 uint32_t rb_base_virt = PPC_LOAD_U32(render_state + 13436);
                 static int dbg_wp = 0;
                 if (++dbg_wp <= 3) {
-                    // Dump first 16 dwords of ring buffer to understand packet format
-                    uint32_t rb_sec = PPC_LOAD_U32(render_state + 13440);
+                    uint32_t rb_prim_d = PPC_LOAD_U32(render_state + 13436);
+                    uint32_t rb_13528_d = PPC_LOAD_U32(render_state + 13528);
+                    uint32_t rb_10780_d = PPC_LOAD_U32(render_state + 10780);
                     FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
                     if (f2) {
-                        // Check if physical and virtual map to same host address
-                    auto* mem = ks->memory();
-                    uint8_t* virt_host = base + rb_sec;
-                    uint8_t* phys_host = mem->TranslatePhysical(0x095F0000);
-                    fprintf(f2, "[WP-Debug #%d] cur_pos=0x%08X rb_sec=0x%08X virt_host=%p phys_host=%p same=%d\n",
-                        dbg_wp, cur_pos, rb_sec, (void*)virt_host, (void*)phys_host, virt_host == phys_host);
-                        // Read first 16 dwords from the ring buffer using host memory
-                        uint8_t* rb_host = base + rb_sec;
-                        fprintf(f2, "  rb_host[0..7]: ");
-                        for (int i = 0; i < 8; i++) {
-                            uint32_t val;
-                            memcpy(&val, rb_host + i*4, 4);
-                            fprintf(f2, "%08X ", val);
-                        }
-                        fprintf(f2, "\n  rb_ppc[0..7]: ");
-                        for (int i = 0; i < 8; i++) fprintf(f2, "%08X ", PPC_LOAD_U32(rb_sec + i*4));
+                        fprintf(f2, "[WP-Debug #%d] primary=0x%08X [13528]=0x%08X [10780]=%u\n",
+                            dbg_wp, rb_prim_d, rb_13528_d, rb_10780_d);
+                        // Dump first dwords of PRIMARY ring buffer (PPC byte-swapped view)
+                        fprintf(f2, "  prim_ppc[0..7]: ");
+                        for (int i = 0; i < 8; i++) fprintf(f2, "%08X ", PPC_LOAD_U32(rb_prim_d + i*4));
                         fprintf(f2, "\n");
+                        // Also read via physical to verify file mapping sharing
+                        auto* mem_ptr = ks->memory();
+                        uint32_t prim_phys = mem_ptr->GetPhysicalAddress(rb_prim_d);
+                        uint8_t* phys_ptr = mem_ptr->TranslatePhysical(prim_phys);
+                        fprintf(f2, "  phys_raw[0..7]: ");
+                        for (int i = 0; i < 8; i++) {
+                            uint32_t v; memcpy(&v, phys_ptr + i*4, 4); fprintf(f2, "%08X ", v);
+                        }
+                        fprintf(f2, "\n  phys_phys=0x%08X\n", prim_phys);
                         fclose(f2);
                     }
                 }
@@ -650,22 +658,36 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                 // [r31+10780] tracks the primary ring buffer write offset in entries
                 uint32_t rb_primary = PPC_LOAD_U32(render_state + 13436);
                 uint32_t rb_10780 = PPC_LOAD_U32(render_state + 10780);
-                if (rb_primary && rb_10780 > 0) {
-                    // Copy primary ring buffer from virtual to physical
-                    uint32_t rb_phys_addr = ks->memory()->GetPhysicalAddress(rb_primary);
-                    if (rb_phys_addr != UINT32_MAX) {
-                        uint8_t* src = base + rb_primary;
-                        uint8_t* dst = ks->memory()->TranslatePhysical(rb_phys_addr);
-                        uint32_t copy_len = rb_10780 * 8; // entries are 8 bytes each
-                        if (copy_len > 0x8000) copy_len = 0x8000;
-                        VirtualAlloc(dst, copy_len + 0x1000, MEM_COMMIT, PAGE_READWRITE);
-                        memcpy(dst, src, copy_len);
+                // Use the primary ring buffer write position from [r31+13528]
+                // This is the aligned write position set by the flush function
+                // Scan the primary ring buffer for valid PM4 packets to find
+                // the actual data end position
+                uint32_t rb_prim = PPC_LOAD_U32(render_state + 13436);
+                if (rb_prim) {
+                    // Parse PM4 packets to find end of valid data
+                    uint32_t scan_pos = 0;
+                    uint32_t max_dwords = 8192; // 32KB / 4
+                    while (scan_pos < max_dwords) {
+                        uint32_t header = PPC_LOAD_U32(rb_prim + scan_pos * 4);
+                        if (header == 0) break; // zero = no more data
+                        uint32_t pkt_type = (header >> 30) & 3;
+                        if (pkt_type == 0) {
+                            // Type 0: count = ((header >> 16) & 0x3FFF) + 1
+                            uint32_t count = ((header >> 16) & 0x3FFF) + 1;
+                            scan_pos += 1 + count;
+                        } else if (pkt_type == 2) {
+                            // Type 2: NOP, 1 dword
+                            scan_pos += 1;
+                        } else if (pkt_type == 3) {
+                            // Type 3: count = ((header >> 16) & 0x3FFF) + 1
+                            uint32_t count = ((header >> 16) & 0x3FFF) + 1;
+                            scan_pos += 1 + count;
+                        } else {
+                            // Type 1 or invalid
+                            break;
+                        }
                     }
-
-                    // Update write pointer based on the primary buffer's tracked position
-                    // The primary buffer descriptor at [10768] tracks the current write position
-                    // [10780] = entries count, each entry = 2 dwords (8 bytes)
-                    uint32_t write_idx = rb_10780 * 2; // convert entries to dwords
+                    uint32_t write_idx = scan_pos;
                     cp->UpdateWritePointer(write_idx);
 
                     static int wp_c = 0;
