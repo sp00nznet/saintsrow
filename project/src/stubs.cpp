@@ -476,6 +476,31 @@ PPC_FUNC(sub_82716020) {
     }
 }
 
+// Hook the ring buffer kick function to trace PM4 generation
+extern "C" void __imp__sub_825D3580(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825D3580) {
+    uint32_t r31 = ctx.r3.u32;
+    uint32_t r4 = ctx.r4.u32; // write position in ring buffer
+    static int kick_trace = 0;
+    if (++kick_trace <= 20) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            uint32_t skip = PPC_LOAD_U32(r31 + 19980);
+            uint8_t dw = PPC_LOAD_U8(r31 + 10809);
+            uint32_t v10780 = PPC_LOAD_U32(r31 + 10780);
+            fprintf(f, "[Kick #%d] r3=0x%08X r4=0x%08X skip=%u dw=0x%02X [10780]=%u\n",
+                kick_trace, r31, r4, skip, dw, v10780);
+            fclose(f);
+        }
+    }
+    __imp__sub_825D3580(ctx, base);
+    if (kick_trace <= 20) {
+        uint32_t new_10780 = PPC_LOAD_U32(r31 + 10780);
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[Kick #%d] EXIT [10780]=%u\n", kick_trace, new_10780); fclose(f); }
+    }
+}
+
 // Hook GPU ring buffer init function to trace why VdInitializeRingBuffer is never called
 extern "C" void __imp__sub_825D3DA8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825D3DA8) {
@@ -499,10 +524,9 @@ PPC_FUNC(sub_825D3DA8) {
     if (f) { fprintf(f, "[RB-Init] EXIT ret=%u [10780]=%u [10772]=0x%08X [10768]=0x%08X [13436]=0x%08X [13440]=0x%08X\n",
         ret, PPC_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
 
-    // Initialize the GPU command processor ring buffer.
-    // The PRIMARY buffer at [13436]=0xE98B7000 contains actual PM4 packets
-    // written by the game's flush function (sub_825D3660/sub_825D3580).
-    // Physical mapping shares the same file-backed pages as virtual.
+    // Initialize with the PRIMARY ring buffer at [13436]=0xE98B7000.
+    // It contains ME_INIT + PM4_INDIRECT_BUFFER references that point
+    // to rendering commands in physical memory (including the secondary buffer).
     if (rb_13436 != 0) {
         auto* ks = REX_KERNEL_STATE();
         auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
@@ -601,15 +625,37 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
             fetch[i] = PPC_LOAD_U32(buf_addr + 4 + i*4);
         }
 
-        // Force a ring buffer flush before issuing swap.
-        // The game's flush function (sub_825D3660) translates game commands
-        // from the secondary buffer into PM4 packets in the primary buffer.
-        // Call it directly to ensure rendering commands are processed.
+        // Trace flush function gate conditions to understand what's blocking
         {
-            extern void sub_825D3660(PPCContext& ctx, uint8_t* base);
-            PPCContext flush_ctx = ctx;
-            flush_ctx.r3.u64 = 0x40001E00; // render state object
-            sub_825D3660(flush_ctx, base);
+            uint32_t rs = 0x40001E00;
+            uint8_t v10808 = PPC_LOAD_U8(rs + 10808);
+            uint8_t v10809 = PPC_LOAD_U8(rs + 10809);
+            uint32_t v12960 = PPC_LOAD_U32(rs + 12960);
+            uint32_t v13160 = PPC_LOAD_U32(rs + 13160);
+            uint32_t v13528 = PPC_LOAD_U32(rs + 13528);
+            uint32_t v40 = PPC_LOAD_U32(rs + 40);
+            static int gate_c = 0;
+            if (++gate_c <= 5) {
+                FILE* gf = fopen("saintsrow_heartbeat.log", "a");
+                if (gf) {
+                    fprintf(gf, "[Flush-Gates #%d] [10808]=0x%02X [10809]=0x%02X [12960]=0x%08X [13160]=0x%08X [13528]=0x%08X [40]=0x%08X\n",
+                        gate_c, v10808, v10809, v12960, v13160, v13528, v40);
+                    // sub_825D3660 gate analysis:
+                    // Gate 1: [10809] bit 0x40 -> if SET, skip to end (loc_825D379C)
+                    fprintf(gf, "  Gate1 [10809]&0x40=%d (must be 0)\n", (v10809 & 0x40) != 0);
+                    // Gate 2: [10808] & 0xFFFFFF80 -> if non-zero, go check [13160]
+                    fprintf(gf, "  Gate2 [10808]&0x80=%d (0=direct, 1=check 13160)\n", (v10808 & 0x80) != 0);
+                    // Gate 3: [13160] -> if 0, skip to loc_825D375C (direct flush path)
+                    fprintf(gf, "  Gate3 [13160]==0: %d (0=direct flush, 1=check further)\n", v13160 == 0);
+                    if (v13160) {
+                        uint32_t v13160_152 = PPC_LOAD_U32(v13160 + 152);
+                        fprintf(gf, "  Gate4 [[13160]+152]=0x%08X (must be 0 for flush)\n", v13160_152);
+                    }
+                    // Gate 5: [12960] -> controls the flush path at loc_825D36F8
+                    fprintf(gf, "  Gate5 [12960]=0x%08X (non-zero enables indirect flush)\n", v12960);
+                    fclose(gf);
+                }
+            }
         }
 
         // Before issuing swap, feed the current ring buffer write pointer
@@ -636,19 +682,13 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                     if (f2) {
                         fprintf(f2, "[WP-Debug #%d] primary=0x%08X [13528]=0x%08X [10780]=%u\n",
                             dbg_wp, rb_prim_d, rb_13528_d, rb_10780_d);
-                        // Dump first dwords of PRIMARY ring buffer (PPC byte-swapped view)
-                        fprintf(f2, "  prim_ppc[0..7]: ");
-                        for (int i = 0; i < 8; i++) fprintf(f2, "%08X ", PPC_LOAD_U32(rb_prim_d + i*4));
+                        // Dump all 31 dwords of PM4 in primary buffer
+                        fprintf(f2, "  prim[0..7]:  "); for (int i=0;i<8;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
+                        fprintf(f2, "\n  prim[8..15]: "); for (int i=8;i<16;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
+                        fprintf(f2, "\n  prim[16..23]:"); for (int i=16;i<24;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
+                        fprintf(f2, "\n  prim[24..31]:"); for (int i=24;i<32;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
+                        fprintf(f2, "\n  prim[32..39]:"); for (int i=32;i<40;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
                         fprintf(f2, "\n");
-                        // Also read via physical to verify file mapping sharing
-                        auto* mem_ptr = ks->memory();
-                        uint32_t prim_phys = mem_ptr->GetPhysicalAddress(rb_prim_d);
-                        uint8_t* phys_ptr = mem_ptr->TranslatePhysical(prim_phys);
-                        fprintf(f2, "  phys_raw[0..7]: ");
-                        for (int i = 0; i < 8; i++) {
-                            uint32_t v; memcpy(&v, phys_ptr + i*4, 4); fprintf(f2, "%08X ", v);
-                        }
-                        fprintf(f2, "\n  phys_phys=0x%08X\n", prim_phys);
                         fclose(f2);
                     }
                 }
@@ -657,33 +697,23 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                 // and update the write pointer.
                 // [r31+10780] tracks the primary ring buffer write offset in entries
                 uint32_t rb_primary = PPC_LOAD_U32(render_state + 13436);
-                uint32_t rb_10780 = PPC_LOAD_U32(render_state + 10780);
-                // Use the primary ring buffer write position from [r31+13528]
-                // This is the aligned write position set by the flush function
-                // Scan the primary ring buffer for valid PM4 packets to find
-                // the actual data end position
+                // Scan the primary ring buffer for valid PM4 packets
+                // The flush function adds INDIRECT_BUFFER_PFD packets over time
                 uint32_t rb_prim = PPC_LOAD_U32(render_state + 13436);
                 if (rb_prim) {
-                    // Parse PM4 packets to find end of valid data
                     uint32_t scan_pos = 0;
-                    uint32_t max_dwords = 8192; // 32KB / 4
+                    uint32_t max_dwords = 8192;
                     while (scan_pos < max_dwords) {
                         uint32_t header = PPC_LOAD_U32(rb_prim + scan_pos * 4);
-                        if (header == 0) break; // zero = no more data
+                        if (header == 0) break;
                         uint32_t pkt_type = (header >> 30) & 3;
                         if (pkt_type == 0) {
-                            // Type 0: count = ((header >> 16) & 0x3FFF) + 1
-                            uint32_t count = ((header >> 16) & 0x3FFF) + 1;
-                            scan_pos += 1 + count;
+                            scan_pos += 1 + ((header >> 16) & 0x3FFF) + 1;
                         } else if (pkt_type == 2) {
-                            // Type 2: NOP, 1 dword
                             scan_pos += 1;
                         } else if (pkt_type == 3) {
-                            // Type 3: count = ((header >> 16) & 0x3FFF) + 1
-                            uint32_t count = ((header >> 16) & 0x3FFF) + 1;
-                            scan_pos += 1 + count;
+                            scan_pos += 1 + ((header >> 16) & 0x3FFF) + 1;
                         } else {
-                            // Type 1 or invalid
                             break;
                         }
                     }
