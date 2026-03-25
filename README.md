@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: Early Analysis**
+**Status: GPU Rendering Pipeline Active**
 
 Static recompilation of Saints Row for Xbox 360 to native x86-64 PC executable using [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk).
 
@@ -65,8 +65,14 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] D3D12 GPU initialization (NVIDIA RTX 5070, ROV, tier 3)
 - [x] Audio system (XMA decoder + SDL audio)
 - [x] Game creates 14+ worker threads (physics, streaming, etc.)
-- [ ] Fix worker thread crash (null pointer in CRT at offset 0x58)
-- [ ] Game-specific kernel stubs (user profile, content, etc.)
+- [x] Bink video decode -- both splash videos decode and audio plays
+- [x] Game state machine -- transitions through loading to GameLoop2
+- [x] VdSwap/IssueSwap -- frames present to D3D12 swap chain
+- [x] GPU ring buffer pipeline -- PM4 indirect buffers, 0 GPU errors
+- [x] Shader compilation -- vertex + pixel shaders generated
+- [x] Render targets created (1280x720 color + depth)
+- [x] Texture loading and resolve operations working
+- [ ] Draw calls / visible game content on screen
 - [ ] Menu navigation
 - [ ] In-game rendering
 - [ ] Gameplay

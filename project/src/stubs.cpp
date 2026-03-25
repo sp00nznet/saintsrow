@@ -793,25 +793,48 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
         // The kick function (sub_825D3580) handles UpdateWritePointer
         // by appending INDIRECT_BUFFER_PFD to the primary ring buffer.
 
+        // Write a test pattern to the framebuffer to verify display pipeline.
+        // The framebuffer at 0x09258000 is a 1280x720 RGBA8 tiled texture.
+        // Xbox 360 uses a specific tiling pattern, but for testing, just write
+        // a gradient pattern to the PHYSICAL memory backing the texture.
+        // The texture cache will pick it up on the next IssueSwap.
+        {
+            auto* mem = ks->memory();
+            // Write directly to PHYSICAL memory (what the GPU texture cache reads)
+            uint8_t* fb_host = mem->TranslatePhysical(fb_phys);
+            static int frame_num = 0;
+            frame_num++;
+
+            // Write a simple color gradient - each frame slightly different
+            // Xbox 360 textures are tiled, so this won't look right geometrically,
+            // but ANY non-black color proves the display pipeline works.
+            uint32_t color;
+            int phase = (frame_num / 30) % 6;
+            switch (phase) {
+                case 0: color = 0xFF0000FF; break; // Red
+                case 1: color = 0x00FF00FF; break; // Green
+                case 2: color = 0x0000FFFF; break; // Blue
+                case 3: color = 0xFFFF00FF; break; // Yellow
+                case 4: color = 0xFF00FFFF; break; // Magenta
+                case 5: color = 0x00FFFFFF; break; // Cyan
+            }
+            // Fill a portion of the framebuffer with the color
+            // Framebuffer is 1280*720*4 = 3,686,400 bytes
+            uint32_t* fb32 = (uint32_t*)fb_host;
+            for (uint32_t i = 0; i < 1280 * 720; i++) {
+                fb32[i] = color;
+            }
+            // Invalidate texture cache so GPU picks up our changes
+            cp->InvalidateGpuMemory();
+        }
+
         // Write fetch constants and issue swap on command processor thread
-        // CallInThread signals the worker event, so the worker thread will
-        // wake up even without InitializeRingBuffer being called.
         static int swap_call = 0;
         int this_call = ++swap_call;
         cp->CallInThread([cp, fb_phys, width, height, fetch, this_call]() {
-            FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
-            if (f2 && this_call <= 10) { fprintf(f2, "[IssueSwap-Thread #%d] ENTER fb=0x%08X %ux%u\n", this_call, fb_phys, width, height); fclose(f2); }
-
             // Write fetch constant 0 (registers 0x4800-0x4805)
             cp->RestoreRegisters(0x4800, fetch, 6, true);
-
-            f2 = fopen("saintsrow_heartbeat.log", "a");
-            if (f2 && this_call <= 10) { fprintf(f2, "[IssueSwap-Thread #%d] fetch written, calling IssueSwap\n", this_call); fclose(f2); }
-
             cp->IssueSwap(fb_phys, width, height);
-
-            f2 = fopen("saintsrow_heartbeat.log", "a");
-            if (f2 && this_call <= 10) { fprintf(f2, "[IssueSwap-Thread #%d] IssueSwap returned\n", this_call); fclose(f2); }
         });
 
         static int kick_c = 0;
