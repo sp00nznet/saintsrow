@@ -505,28 +505,120 @@ PPC_FUNC(sub_825D3580) {
     uint32_t ib_start = last_ib_end ? last_ib_end : rb_sec;
     uint32_t ib_end = r4 + 40; // after kick's 10 dwords
 
-    if (rb_prim && ib_start < ib_end && prim_write_pos < 8000) {
-        uint32_t phys_start = ks->memory()->GetPhysicalAddress(ib_start);
-        uint32_t ib_dwords = (ib_end - ib_start) / 4;
-
-        if (phys_start != UINT32_MAX && ib_dwords > 0 && ib_dwords < 0x100000) {
-            // Write PM4 INDIRECT_BUFFER_PFD: opcode 0x3F, count=2
+    if (rb_prim && prim_write_pos < 8000) {
+        // Only create an indirect buffer for the KICK's own 10 dwords of PM4.
+        // These are known-valid: WAIT_FOR_IDLE + 2x EVENT_WRITE_SHD
+        // The rendering PM4 between kicks needs separate handling.
+        uint32_t phys_kick = ks->memory()->GetPhysicalAddress(r4);
+        if (phys_kick != UINT32_MAX) {
             PPC_STORE_U32(rb_prim + prim_write_pos * 4, 0xC0013F00);
-            PPC_STORE_U32(rb_prim + (prim_write_pos + 1) * 4, phys_start);
-            PPC_STORE_U32(rb_prim + (prim_write_pos + 2) * 4, ib_dwords);
+            PPC_STORE_U32(rb_prim + (prim_write_pos + 1) * 4, phys_kick);
+            PPC_STORE_U32(rb_prim + (prim_write_pos + 2) * 4, 10);
             prim_write_pos += 3;
+
+            // Also create an IB for rendering PM4 between last kick end and this kick.
+            // Scan the data to find valid PM4 extent.
+            if (last_ib_end > 0 && last_ib_end < r4) {
+                uint32_t scan_start = last_ib_end;
+                uint32_t scan_pos = 0;
+                uint32_t scan_len = (r4 - scan_start) / 4;
+                // The data starts with zero padding, then has valid PM4.
+                // Skip leading zeros to find the PM4 start.
+                uint32_t pm4_start = 0;
+                while (pm4_start < scan_len && PPC_LOAD_U32(scan_start + pm4_start * 4) == 0) {
+                    pm4_start++;
+                }
+                // Scan for contiguous valid PM4 packets from pm4_start
+                scan_pos = pm4_start;
+                while (scan_pos < scan_len) {
+                    uint32_t hdr = PPC_LOAD_U32(scan_start + scan_pos * 4);
+                    if (hdr == 0) {
+                        // Skip zero padding (possible alignment)
+                        scan_pos++;
+                        continue;
+                    }
+                    uint32_t pkt_type = (hdr >> 30) & 3;
+                    uint32_t count;
+                    if (pkt_type == 0) {
+                        count = ((hdr >> 16) & 0x3FFF) + 1;
+                        if (count > 0x2000 || scan_pos + 1 + count > scan_len) break;
+                        scan_pos += 1 + count;
+                    } else if (pkt_type == 2) {
+                        scan_pos += 1;
+                    } else if (pkt_type == 3) {
+                        count = ((hdr >> 16) & 0x3FFF) + 1;
+                        if (count > 0x2000 || scan_pos + 1 + count > scan_len) break;
+                        scan_pos += 1 + count;
+                    } else {
+                        break; // Type1 or invalid
+                    }
+                }
+                if (scan_pos > pm4_start) {
+                    // Create IB starting from where PM4 begins (after zero padding)
+                    uint32_t pm4_addr = scan_start + pm4_start * 4;
+                    uint32_t pm4_dwords = scan_pos - pm4_start;
+                    uint32_t phys_render = ks->memory()->GetPhysicalAddress(pm4_addr);
+                    if (phys_render != UINT32_MAX && prim_write_pos < 7990) {
+                        PPC_STORE_U32(rb_prim + prim_write_pos * 4, 0xC0013F00);
+                        PPC_STORE_U32(rb_prim + (prim_write_pos + 1) * 4, phys_render);
+                        PPC_STORE_U32(rb_prim + (prim_write_pos + 2) * 4, pm4_dwords);
+                        prim_write_pos += 3;
+
+                        static int render_ib_c = 0;
+                        if (++render_ib_c <= 3) {
+                            FILE* rf = fopen("saintsrow_heartbeat.log", "a");
+                            if (rf) {
+                                fprintf(rf, "[Render-IB #%d] phys=0x%08X dwords=%u (skipped %u zeros)\n",
+                                    render_ib_c, phys_render, pm4_dwords, pm4_start);
+                                // Decode first few PM4 opcodes
+                                uint32_t dp = 0;
+                                for (int pkt = 0; pkt < 10 && dp < pm4_dwords; pkt++) {
+                                    uint32_t h = PPC_LOAD_U32(pm4_addr + dp * 4);
+                                    uint32_t pt = (h >> 30) & 3;
+                                    if (pt == 3) {
+                                        uint32_t op = (h >> 8) & 0xFF;
+                                        uint32_t cnt = ((h >> 16) & 0x3FFF) + 1;
+                                        fprintf(rf, "  [%u] Type3 op=0x%02X cnt=%u\n", dp, op, cnt);
+                                        dp += 1 + cnt;
+                                    } else if (pt == 0) {
+                                        uint32_t reg = h & 0x7FFF;
+                                        uint32_t cnt = ((h >> 16) & 0x3FFF) + 1;
+                                        fprintf(rf, "  [%u] Type0 reg=0x%04X cnt=%u\n", dp, reg, cnt);
+                                        dp += 1 + cnt;
+                                    } else if (h == 0) {
+                                        dp++; // skip zero
+                                    } else {
+                                        fprintf(rf, "  [%u] Type%u hdr=0x%08X\n", dp, pt, h);
+                                        dp++;
+                                    }
+                                }
+                                fclose(rf);
+                            }
+                        }
+                    }
+                }
+            }
 
             cp->UpdateWritePointer(prim_write_pos);
 
             static int ib_c = 0;
-            if (++ib_c <= 10) {
+            if (++ib_c <= 5) {
                 FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                if (f) { fprintf(f, "[IB #%d] phys=0x%08X dwords=%u prim_wp=%u\n",
-                    ib_c, phys_start, ib_dwords, prim_write_pos); fclose(f); }
+                if (f) {
+                    fprintf(f, "[IB #%d] kick=0x%08X prim_wp=%u last_end=0x%08X r4=0x%08X\n",
+                        ib_c, phys_kick, prim_write_pos, last_ib_end, r4);
+                    // Dump first dwords of the rendering range
+                    if (last_ib_end > 0 && last_ib_end < r4) {
+                        fprintf(f, "  render[0..7]: ");
+                        for (int i = 0; i < 8; i++) fprintf(f, "%08X ", PPC_LOAD_U32(last_ib_end + i*4));
+                        fprintf(f, "\n");
+                    }
+                    fclose(f);
+                }
             }
         }
 
-        last_ib_end = ib_end;
+        last_ib_end = r4 + 40;
     }
 
     static int kick_trace = 0;
