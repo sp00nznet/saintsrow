@@ -476,28 +476,69 @@ PPC_FUNC(sub_82716020) {
     }
 }
 
-// Hook the ring buffer kick function to trace PM4 generation
+// Hook the ring buffer kick function.
+// After the game writes its structure to the secondary buffer,
+// extract the indirect buffer addresses and feed them to the CP.
 extern "C" void __imp__sub_825D3580(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825D3580) {
     uint32_t r31 = ctx.r3.u32;
-    uint32_t r4 = ctx.r4.u32; // write position in ring buffer
+    uint32_t r4 = ctx.r4.u32; // where the structure will be written
+
+    __imp__sub_825D3580(ctx, base);
+
+    // The kick function wrote 10 dwords of PM4 at r4 in the secondary buffer.
+    // But the game also writes rendering PM4 BEFORE this position.
+    // Create an INDIRECT_BUFFER_PFD covering ALL data from the last position
+    // to the current position (including the 10 kick dwords).
+    auto* ks = REX_KERNEL_STATE();
+    auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
+    auto* cp = gs->command_processor();
+
+    uint32_t rb_prim = PPC_LOAD_U32(r31 + 13436);
+    uint32_t rb_sec = PPC_LOAD_U32(r31 + 13440);
+
+    // Track where we last created an indirect buffer reference
+    static uint32_t last_ib_end = 0;
+    static uint32_t prim_write_pos = 31;
+
+    // The data between last_ib_end and r4+40 contains rendering PM4 + kick PM4
+    uint32_t ib_start = last_ib_end ? last_ib_end : rb_sec;
+    uint32_t ib_end = r4 + 40; // after kick's 10 dwords
+
+    if (rb_prim && ib_start < ib_end && prim_write_pos < 8000) {
+        uint32_t phys_start = ks->memory()->GetPhysicalAddress(ib_start);
+        uint32_t ib_dwords = (ib_end - ib_start) / 4;
+
+        if (phys_start != UINT32_MAX && ib_dwords > 0 && ib_dwords < 0x100000) {
+            // Write PM4 INDIRECT_BUFFER_PFD: opcode 0x3F, count=2
+            PPC_STORE_U32(rb_prim + prim_write_pos * 4, 0xC0013F00);
+            PPC_STORE_U32(rb_prim + (prim_write_pos + 1) * 4, phys_start);
+            PPC_STORE_U32(rb_prim + (prim_write_pos + 2) * 4, ib_dwords);
+            prim_write_pos += 3;
+
+            cp->UpdateWritePointer(prim_write_pos);
+
+            static int ib_c = 0;
+            if (++ib_c <= 10) {
+                FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                if (f) { fprintf(f, "[IB #%d] phys=0x%08X dwords=%u prim_wp=%u\n",
+                    ib_c, phys_start, ib_dwords, prim_write_pos); fclose(f); }
+            }
+        }
+
+        last_ib_end = ib_end;
+    }
+
     static int kick_trace = 0;
-    if (++kick_trace <= 20) {
+    if (++kick_trace <= 5) {
+        uint32_t d[10];
+        for (int i = 0; i < 10; i++) d[i] = PPC_LOAD_U32(r4 + i*4);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
-            uint32_t skip = PPC_LOAD_U32(r31 + 19980);
-            uint8_t dw = PPC_LOAD_U8(r31 + 10809);
-            uint32_t v10780 = PPC_LOAD_U32(r31 + 10780);
-            fprintf(f, "[Kick #%d] r3=0x%08X r4=0x%08X skip=%u dw=0x%02X [10780]=%u\n",
-                kick_trace, r31, r4, skip, dw, v10780);
+            fprintf(f, "[Kick #%d] @0x%08X: %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X\n",
+                kick_trace, r4, d[0],d[1],d[2],d[3],d[4],d[5],d[6],d[7],d[8],d[9]);
             fclose(f);
         }
-    }
-    __imp__sub_825D3580(ctx, base);
-    if (kick_trace <= 20) {
-        uint32_t new_10780 = PPC_LOAD_U32(r31 + 10780);
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[Kick #%d] EXIT [10780]=%u\n", kick_trace, new_10780); fclose(f); }
     }
 }
 
@@ -524,9 +565,9 @@ PPC_FUNC(sub_825D3DA8) {
     if (f) { fprintf(f, "[RB-Init] EXIT ret=%u [10780]=%u [10772]=0x%08X [10768]=0x%08X [13436]=0x%08X [13440]=0x%08X\n",
         ret, PPC_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
 
-    // Initialize with the PRIMARY ring buffer at [13436]=0xE98B7000.
-    // It contains ME_INIT + PM4_INDIRECT_BUFFER references that point
-    // to rendering commands in physical memory (including the secondary buffer).
+    // Use the PRIMARY ring buffer. It starts with 31 dwords of valid PM4
+    // (ME_INIT + 4 INDIRECT_BUFFER_PFD). We'll append more INDIRECT_BUFFER
+    // references as the kick function produces them.
     if (rb_13436 != 0) {
         auto* ks = REX_KERNEL_STATE();
         auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
@@ -535,7 +576,6 @@ PPC_FUNC(sub_825D3DA8) {
         uint32_t rb_phys = ks->memory()->GetPhysicalAddress(rb_13436);
         if (rb_phys != UINT32_MAX) {
             // Primary ring buffer at 0xE98B7000, size 0x8000 (32KB)
-            // size_log2 = 12 (2^15 = 32KB)
             int size_log2 = 12;
             cp->InitializeRingBuffer(rb_phys, size_log2);
 
@@ -658,77 +698,8 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
             }
         }
 
-        // Before issuing swap, feed the current ring buffer write pointer
-        // to the command processor. The game writes the write pointer to
-        // [render_state+10768] (descriptor area) but this doesn't reach
-        // the GPU command processor because it's not MMIO-mapped.
-        // Read the write pointer and call UpdateWritePointer to process
-        // all pending rendering commands in the ring buffer.
-        {
-            uint32_t render_state = 0x40001E00;
-            uint32_t desc = PPC_LOAD_U32(render_state + 10768);
-            if (desc) {
-                // The game writes [desc+0] = writeback data, [desc+4] = write ptr value
-                // Actually the descriptor format may differ. Let's check [render_state+40]
-                // which is where the current ring buffer position is stored.
-                uint32_t cur_pos = PPC_LOAD_U32(render_state + 40);
-                uint32_t rb_base_virt = PPC_LOAD_U32(render_state + 13436);
-                static int dbg_wp = 0;
-                if (++dbg_wp <= 3) {
-                    uint32_t rb_prim_d = PPC_LOAD_U32(render_state + 13436);
-                    uint32_t rb_13528_d = PPC_LOAD_U32(render_state + 13528);
-                    uint32_t rb_10780_d = PPC_LOAD_U32(render_state + 10780);
-                    FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
-                    if (f2) {
-                        fprintf(f2, "[WP-Debug #%d] primary=0x%08X [13528]=0x%08X [10780]=%u\n",
-                            dbg_wp, rb_prim_d, rb_13528_d, rb_10780_d);
-                        // Dump all 31 dwords of PM4 in primary buffer
-                        fprintf(f2, "  prim[0..7]:  "); for (int i=0;i<8;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
-                        fprintf(f2, "\n  prim[8..15]: "); for (int i=8;i<16;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
-                        fprintf(f2, "\n  prim[16..23]:"); for (int i=16;i<24;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
-                        fprintf(f2, "\n  prim[24..31]:"); for (int i=24;i<32;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
-                        fprintf(f2, "\n  prim[32..39]:"); for (int i=32;i<40;i++) fprintf(f2,"%08X ",PPC_LOAD_U32(rb_prim_d+i*4));
-                        fprintf(f2, "\n");
-                        fclose(f2);
-                    }
-                }
-                // The primary ring buffer is at [13436]. The game's flush code
-                // writes PM4 data there. We need to sync it to physical memory
-                // and update the write pointer.
-                // [r31+10780] tracks the primary ring buffer write offset in entries
-                uint32_t rb_primary = PPC_LOAD_U32(render_state + 13436);
-                // Scan the primary ring buffer for valid PM4 packets
-                // The flush function adds INDIRECT_BUFFER_PFD packets over time
-                uint32_t rb_prim = PPC_LOAD_U32(render_state + 13436);
-                if (rb_prim) {
-                    uint32_t scan_pos = 0;
-                    uint32_t max_dwords = 8192;
-                    while (scan_pos < max_dwords) {
-                        uint32_t header = PPC_LOAD_U32(rb_prim + scan_pos * 4);
-                        if (header == 0) break;
-                        uint32_t pkt_type = (header >> 30) & 3;
-                        if (pkt_type == 0) {
-                            scan_pos += 1 + ((header >> 16) & 0x3FFF) + 1;
-                        } else if (pkt_type == 2) {
-                            scan_pos += 1;
-                        } else if (pkt_type == 3) {
-                            scan_pos += 1 + ((header >> 16) & 0x3FFF) + 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    uint32_t write_idx = scan_pos;
-                    cp->UpdateWritePointer(write_idx);
-
-                    static int wp_c = 0;
-                    if (++wp_c <= 10) {
-                        FILE* f2 = fopen("saintsrow_heartbeat.log", "a");
-                        if (f2) { fprintf(f2, "[VdSwap-WP #%d] pos=0x%08X base=0x%08X idx=%u\n",
-                            wp_c, cur_pos, rb_base_virt, write_idx); fclose(f2); }
-                    }
-                }
-            }
-        }
+        // The kick function (sub_825D3580) handles UpdateWritePointer
+        // by appending INDIRECT_BUFFER_PFD to the primary ring buffer.
 
         // Write fetch constants and issue swap on command processor thread
         // CallInThread signals the worker event, so the worker thread will
