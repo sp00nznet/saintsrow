@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: GPU Rendering Pipeline Active**
+**Status: Streaming IO Chain Working, Game Loop Active**
 
 Static recompilation of Saints Row for Xbox 360 to native x86-64 PC executable using [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk).
 
@@ -72,10 +72,25 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Shader compilation -- vertex + pixel shaders generated
 - [x] Render targets created (1280x720 color + depth)
 - [x] Texture loading and resolve operations working
+- [x] Streaming IO chain -- IO completion callbacks fire, data loaded from packfiles
+- [x] GL2_Render running stably (600+ frames, 0 crashes)
+- [x] GameLoop2 with GL2_Init, GL2_World, GL2_Spawn, GL2_Physics all executing
+- [x] Content loading system partially working (IO read + registration)
+- [ ] Worker ring buffer population (loaded data reaching render workers)
 - [ ] Draw calls / visible game content on screen
 - [ ] Menu navigation
 - [ ] In-game rendering
 - [ ] Gameplay
+
+### Current Architecture
+
+The game loop runs: GL2_Init → GL2_Render → GL2_Physics → GL2_World → GL2_Spawn. The streaming IO chain processes packfile data (shaders, meshes, textures) through: StreamCallback → IOComp → ResLookup → BufAlloc → IORead → IOWork. The first IO initialization creates 8 worker threads. Subsequent IO operations bypass thread re-creation via ExCreateThread handle reuse.
+
+### Known Issues
+
+- Loading queue processes 3/151 items before bypass (IO completion registration not fully connected to workers)
+- Second Bink video (sr_nite_01.bik) blocked due to garbage allocation crash
+- XamInput functions stubbed (SDK input_system() returns null)
 
 ## Related Projects
 

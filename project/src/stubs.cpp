@@ -15,6 +15,18 @@
 #include <cstdio>
 #include <chrono>
 #include <thread>
+#include <atomic>
+
+// Worker thread semaphore handles captured from sub_826368E0
+static uint32_t g_worker_sem_handles[16] = {};
+static int g_worker_sem_count = 0;
+
+// Global flag to skip thread creation during IO re-initialization
+extern std::atomic<bool> g_skip_thread_creation;
+
+// Track handles from real ExCreateThread calls for reuse
+extern uint32_t g_io_thread_handles[8];
+extern int g_io_thread_handle_count;
 
 // ============================================================================
 // XAM User / Profile Stubs
@@ -78,11 +90,22 @@ PPC_FUNC(sub_82789658) { // BinkWait
 }
 PPC_FUNC(sub_82789EE8) { // BinkOpen
     static int c = 0;
-    if (++c <= 5) {
-        char fn[256] = {0};
+    c++;
+    char fn[256] = {0};
+    if (ctx.r3.u32) {
         for (int i = 0; i < 255; i++) { fn[i] = (char)PPC_LOAD_U8(ctx.r3.u32 + i); if (!fn[i]) break; }
+    }
+    if (c <= 5) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[BinkOpen #%d] '%s'\n", c, fn); fclose(f); }
+    }
+    // Only allow the first BinkOpen (THQ logo). The second one (sr_nite_01.bik)
+    // causes a garbage 0xC271A7B0 allocation that corrupts memory and crashes.
+    if (c >= 2) {
+        ctx.r3.u64 = 0; // return null handle (video won't play)
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BinkOpen #%d] BLOCKED '%s' (prevents garbage alloc crash)\n", c, fn); fclose(f); }
+        return;
     }
     __imp__sub_82789EE8(ctx, base);
     if (c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -181,6 +204,21 @@ PPC_FUNC(sub_825DF970) {
 extern "C" void __imp__sub_82653F98(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_827166C0(PPCContext& ctx, uint8_t* base);
 
+// Hook sub_82653F98 (scene/camera tick) - this was crashing through XamInputGetKeystrokeEx
+PPC_FUNC(sub_82653F98) {
+    static int c = 0;
+    c++;
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[SceneTick #%d] ENTER\n", c); fclose(f); }
+    }
+    __imp__sub_82653F98(ctx, base);
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[SceneTick #%d] EXIT\n", c); fclose(f); }
+    }
+}
+
 // Hook sub_827166C0 -- reads TLS r13+256 -> [+332] to get GPU/render context
 PPC_FUNC(sub_827166C0) {
     __imp__sub_827166C0(ctx, base);
@@ -251,15 +289,77 @@ PPC_FUNC(sub_82648ED8) {
 // When internal_state=0, the function immediately exits to state 3 (done).
 // Force internal_state to 2 on first call to enter the loading flow.
 extern "C" void __imp__sub_822827B0(PPCContext& ctx, uint8_t* base);
-// GameUpdate - trace the loading state machine (no more forcing)
+// GameUpdate - trace the loading state machine
+// The state at [0x8370DD7C] controls the main loop:
+//   0 = default (immediately sets to 3)
+//   1 = loading phase 1 (stuck here because content loading can't complete)
+//   2 = loading phase 2
+//   3 = done → exits loading loop → proceeds to game loop with GL2_Render
+// Force state to 3 after a few frames to bypass the stuck loading.
 PPC_FUNC(sub_822827B0) {
     static int _c = 0; _c++;
+    uint32_t state_before = PPC_LOAD_U32(0x8370DD7C);
     __imp__sub_822827B0(ctx, base);
-    if (_c <= 20) {
-        uint32_t new_i = PPC_LOAD_U32(0x8371DD7C);
-        uint32_t new_m = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t state_after = PPC_LOAD_U32(0x8370DD7C);
+    if (_c <= 30 || state_before != state_after) {
+        // Trace the exact internal computation that should advance state
+        uint32_t r31_addr = 0x8370DA78;
+        uint32_t queue_ptr = PPC_LOAD_U32(r31_addr - 196);
+        uint32_t q8 = queue_ptr ? PPC_LOAD_U32(queue_ptr + 8) : 0;
+        uint32_t q12 = queue_ptr ? PPC_LOAD_U32(queue_ptr + 12) : 0;
+        int32_t diff = (int32_t)(q8 - q12);
+        uint32_t clz = (diff == 0) ? 32 : __builtin_clz((uint32_t)diff);
+        // PPC rlwinm r11,r11,27,31,31: rotate 32-bit left by 27, mask bit 31 (LSB)
+        uint32_t rotl = ((clz << 27) | (clz >> 5)); // 32-bit rotate left 27
+        uint32_t should_advance = rotl & 1;
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GameUpdate #%d] int=%u main=%u\n", _c, new_i, new_m); fclose(f); }
+        if (f) { fprintf(f, "[GameUpdate #%d] state %u -> %u (queue=0x%08X q8=%u q12=%u diff=%d clz=%u rotl=0x%X advance=%u)\n",
+            _c, state_before, state_after, queue_ptr, q8, q12, diff, clz, rotl, should_advance); fclose(f); }
+    }
+    // Log the loading check flags and state machine internals
+    if (_c <= 50 || _c % 100 == 0) {
+        uint32_t r31_addr = 0x8370DA78;
+        uint32_t load_queue = PPC_LOAD_U32(r31_addr - 196); // [r31-196] = loading queue ptr
+        uint32_t internal_var = PPC_LOAD_U32(r31_addr + 0);  // [r31+0] another state var
+        uint32_t r31_776 = PPC_LOAD_U32(r31_addr + 776);     // [r31+776]
+        // sub_82282638 checks 4 entries at base 0x840BAAE8, stride 584
+        uint32_t base = 0x840BAAE8;
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            uint32_t q8 = load_queue ? PPC_LOAD_U32(load_queue + 8) : 0;
+            uint32_t q12 = load_queue ? PPC_LOAD_U32(load_queue + 12) : 0;
+            fprintf(f, "[LoadCheck #%d] queue=0x%08X [+8]=0x%08X [+12]=0x%08X (empty=%d) var0=%u ",
+                _c, load_queue, q8, q12, (q8 == q12), internal_var);
+            for (int i = 0; i < 4; i++) {
+                uint32_t entry = base + i * 584;
+                uint8_t b24 = PPC_LOAD_U8(entry + 24);
+                uint8_t b108 = PPC_LOAD_U8(entry + 108);
+                uint8_t b360 = PPC_LOAD_U8(entry + 360);
+                fprintf(f, "e%d[%u,%u,%u] ", i, b24, b108, b360);
+            }
+            fprintf(f, "\n");
+            fclose(f);
+        }
+    }
+    // Pump the streaming callback from the MAIN thread. IOComp deadlocks on
+    // worker threads but works on the main thread.
+    if (state_after == 1) {
+        PPC_STORE_U32(0x837102B4, 0); // clear tick counter callback
+        extern void sub_8265F720(PPCContext& ctx, uint8_t* base);
+        PPCContext sc_ctx = ctx;
+        sc_ctx.r3.u64 = 0x827A1F24;
+        sc_ctx.r4.u64 = 0x827A1F28;
+        sc_ctx.r5.u64 = 0;
+        sc_ctx.r6.u64 = 0;
+        sub_8265F720(sc_ctx, base);
+    }
+    // Force bypass - loading can't complete because the streaming callback
+    // deadlocks when called from the main thread. The IO dispatch needs a
+    // dedicated thread (not implemented yet).
+    if (_c >= 10 && state_after == 1) {
+        PPC_STORE_U32(0x8370DD7C, 3);
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GameUpdate #%d] FORCED state 1 -> 3 (loading timeout)\n", _c); fclose(f); }
     }
 }
 TRACE_STATE("VideoMgr", 821FB9D8)
@@ -336,12 +436,23 @@ TRACE_STATE("RenderC", 8263DD80)
 // GL2_Render with detailed state check
 extern "C" void __imp__sub_8262FFE0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8262FFE0) {
+    // [0x8372033C] = skip_flag at [r28+32] where r28=0x8372031C
+    // If non-zero, GL2_Render returns immediately (no rendering)
     uint32_t skip_flag = PPC_LOAD_U32(0x8372033C);
     uint32_t render_skip = PPC_LOAD_U32(0x83720340);
+    uint32_t frame_count = PPC_LOAD_U32(0x83720320 + 800); // frame counter at [r28+800]
     static int _c = 0; _c++;
-    if (_c <= 10) {
+    static int skip_count = 0;
+    static int render_count = 0;
+    if (skip_flag != 0) skip_count++;
+    else render_count++;
+    if (_c <= 30 || (_c % 300 == 0)) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GL2_Render #%d] skip=%u render_skip=%u\n", _c, skip_flag, render_skip); fclose(f); }
+        if (f) {
+            fprintf(f, "[GL2_Render #%d] skip=%u render_skip=%u frames=%u (rendered=%d skipped=%d)\n",
+                _c, skip_flag, render_skip, frame_count, render_count, skip_count);
+            fclose(f);
+        }
     }
     __imp__sub_8262FFE0(ctx, base);
 }
@@ -386,6 +497,34 @@ TRACE_CALL("GL2_World", 82355E88)
 TRACE_CALL("GL2_Spawn", 8265AF50)
 TRACE_CALL("ThreadWrap", 82716078)
 // sub_82716020 already hooked above for force-flag
+// sub_82604B00 is the callback/event dispatcher used by the content loading system.
+// Previously stubbed because it blocked on a critical section. Now let it run
+// to allow loading callbacks to fire and update viewport loading flags.
+extern "C" void __imp__sub_82604B00(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82604B00) {
+    static int c = 0;
+    c++;
+    uint32_t arg = ctx.r3.u32;
+    uint32_t cb_ptr = PPC_LOAD_U32(0x837102B4);
+    // Log the function table that RunCallbacks scans
+    // lis(-32134) = 0x827A0000, +0x1F20 = 0x827A1F20
+    // Scan from 0x827A1F24 to 0x827A1F28 for non-null function pointers
+    uint32_t ft0 = PPC_LOAD_U32(0x827A1F20);
+    uint32_t ft1 = PPC_LOAD_U32(0x827A1F24);
+    uint32_t ft2 = PPC_LOAD_U32(0x827A1F28);
+    uint32_t cb_vt = cb_ptr ? PPC_LOAD_U32(cb_ptr) : 0;
+    uint32_t cb_fn = cb_vt ? PPC_LOAD_U32(cb_vt + 4) : 0;
+    if (c <= 10 || (c % 200 == 0)) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "[RunCallbacks #%d] r3=0x%08X cb=0x%08X cb_fn=0x%08X\n",
+                c, arg, cb_ptr, cb_fn);
+            fclose(f);
+        }
+    }
+    __imp__sub_82604B00(ctx, base);
+}
+
 // sub_82604C10 blocks on a critical section after main loop exits.
 // Stub it to return 0 to unblock the game thread.
 PPC_FUNC(sub_82604C10) {
@@ -846,15 +985,441 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
     }
 }
 
-// Trace GPU command buffer writer
+// Trace GPU command buffer writer - this is the core function that writes PM4 to the command buffer
 extern "C" void __imp__sub_825CC640(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825CC640) {
     static int c = 0;
-    if (++c <= 10) {
+    c++;
+    if (c <= 20 || (c % 1000 == 0)) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GPU-Write #%d] r3=0x%08X r4=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+        if (f) { fprintf(f, "[GPU-Write #%d] r3=0x%08X r4=0x%08X r5=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32); fclose(f); }
     }
     __imp__sub_825CC640(ctx, base);
+}
+
+// Track draw dispatch functions - these set up draw calls that should generate PM4_DRAW_INDX
+extern "C" void __imp__sub_825CCAB0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825CCAB0) {
+    static int c = 0;
+    if (++c <= 20) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[DrawSetup #%d] r3=0x%08X r4=0x%08X r5=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32); fclose(f); }
+    }
+    __imp__sub_825CCAB0(ctx, base);
+}
+
+// Track sub_825CCB78 - complex draw state machine dispatching different draw modes
+extern "C" void __imp__sub_825CCB78(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825CCB78) {
+    static int c = 0;
+    if (++c <= 20) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[DrawStateMachine #%d] r3=0x%08X r4=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+    }
+    __imp__sub_825CCB78(ctx, base);
+}
+
+// Track shader/state setup
+extern "C" void __imp__sub_825CC5B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825CC5B0) {
+    static int c = 0;
+    if (++c <= 20) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[ShaderSetup #%d] r3=0x%08X r4=0x%08X r5=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32); fclose(f); }
+    }
+    __imp__sub_825CC5B0(ctx, base);
+}
+
+// Stub XamInputGetKeystrokeEx - the SDK's input_system() returns null,
+// causing a crash at NULL+8 in GetKeystroke(). Override the SDK import directly.
+// The func_mapping maps 0x82788EE4 -> __imp__XamInputGetKeystrokeEx,
+// so PPC_FUNC(sub_82788EE4) doesn't intercept calls.
+// Use PPC_FUNC_IMPL to override the SDK's __imp__XamInputGetKeystrokeEx.
+PPC_FUNC_IMPL(__imp__XamInputGetKeystrokeEx) {
+    static int c = 0;
+    if (++c <= 3) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[XamInputGetKeystrokeEx] STUBBED #%d -> NOT_CONNECTED\n", c); fclose(f); }
+    }
+    ctx.r3.u64 = 0x80070481; // X_ERROR_DEVICE_NOT_CONNECTED
+}
+
+// Stub XamInputSetState - also crashes on null input_system()
+PPC_FUNC_IMPL(__imp__XamInputSetState) {
+    ctx.r3.u64 = 0x80070481; // X_ERROR_DEVICE_NOT_CONNECTED
+}
+
+// Stub XamInputGetState - same null input_system() crash
+PPC_FUNC_IMPL(__imp__XamInputGetState) {
+    // Zero the output state struct (r5 = pointer to XINPUT_STATE)
+    if (ctx.r5.u32) {
+        for (int i = 0; i < 8; i++) PPC_STORE_U32(ctx.r5.u32 + i*4, 0);
+    }
+    ctx.r3.u64 = 0x80070481; // X_ERROR_DEVICE_NOT_CONNECTED
+}
+
+// Hook NtAllocateVirtualMemory to log failures (BaseHeap::Alloc page count too big)
+extern "C" void __imp__NtAllocateVirtualMemory(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827893D4) { // NtAllocateVirtualMemory thunk
+    uint32_t base_addr_ptr = ctx.r3.u32;
+    uint32_t region_size_ptr = ctx.r4.u32;
+    uint32_t alloc_type = ctx.r5.u32;
+    uint32_t protect = ctx.r6.u32;
+    uint32_t input_base = base_addr_ptr ? PPC_LOAD_U32(base_addr_ptr) : 0;
+    uint32_t input_size = region_size_ptr ? PPC_LOAD_U32(region_size_ptr) : 0;
+
+    __imp__NtAllocateVirtualMemory(ctx, base);
+
+    uint32_t result = ctx.r3.u32;
+    if (result != 0) { // failed
+        static int fail_c = 0;
+        if (++fail_c <= 30) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) {
+                fprintf(f, "[NtAllocVM FAIL #%d] base=0x%08X size=0x%08X (%u KB) type=0x%X prot=0x%X -> 0x%08X\n",
+                    fail_c, input_base, input_size, input_size / 1024, alloc_type, protect, result);
+                fclose(f);
+            }
+        }
+    } else {
+        uint32_t out_addr = base_addr_ptr ? PPC_LOAD_U32(base_addr_ptr) : 0;
+        uint32_t out_size = region_size_ptr ? PPC_LOAD_U32(region_size_ptr) : 0;
+        static int ok_c = 0;
+        if (++ok_c <= 30 || input_size >= 0x100000) { // log first 30 + any large allocs
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) {
+                fprintf(f, "[NtAllocVM OK #%d] base=0x%08X size=0x%08X -> addr=0x%08X size=0x%08X (%u KB)\n",
+                    ok_c, input_base, input_size, out_addr, out_size, out_size / 1024);
+                fclose(f);
+            }
+        }
+    }
+}
+
+// Capture worker thread semaphore handles and pump them from the main thread.
+// The IO completion callbacks never fire (sub_826E7190 is never called), so
+// the worker thread semaphores are never signaled after the initial count.
+// We signal them periodically from the GameUpdate hook to keep loading progressing.
+#include <rex/system/xsemaphore.h>
+
+// Hook worker thread (sub_826368E0) to capture semaphore handles and work function
+extern "C" void __imp__sub_826368E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_826368E0) {
+    uint32_t context = ctx.r3.u32;
+    uint32_t sem_handle = context ? PPC_LOAD_U32(context + 64) : 0;
+    uint32_t work_func = context ? PPC_LOAD_U32(context + 52) : 0;
+    if (sem_handle && g_worker_sem_count < 16) {
+        bool found = false;
+        for (int i = 0; i < g_worker_sem_count; i++) {
+            if (g_worker_sem_handles[i] == sem_handle) { found = true; break; }
+        }
+        if (!found) {
+            g_worker_sem_handles[g_worker_sem_count++] = sem_handle;
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[WorkerThread] ctx=0x%08X sem=0x%08X work=0x%08X (total=%d)\n",
+                context, sem_handle, work_func, g_worker_sem_count); fclose(f); }
+        }
+    }
+    __imp__sub_826368E0(ctx, base);
+}
+
+// Hook streaming manager callback (sub_8265F720) and work finder (sub_8265F4F0)
+extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8265F4F0) {
+    uint32_t filter = ctx.r3.u32;
+    // Check the pending request count at 0x827A6BC4
+    uint32_t req_count = PPC_LOAD_U8(0x827A6BC4);
+    __imp__sub_8265F4F0(ctx, base);
+    static int c = 0;
+    if (++c <= 20 || (c % 200 == 0)) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[StreamFind #%d] filter=0x%08X req_count=%u -> result=0x%08X\n",
+            c, filter, req_count, ctx.r3.u32); fclose(f); }
+    }
+}
+
+extern "C" void __imp__sub_8265F720(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8265F720) {
+    static int c = 0;
+    c++;
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[StreamCallback #%d] ENTER\n", c); fclose(f); }
+    }
+
+    // The real callback deadlocks on 2nd+ call because sub_82604BE8
+    // (the IO completion processor at [0x827A1F28]) enters a blocking IO chain.
+    // Hook sub_82604BE8 to make it non-blocking by stubbing its call to sub_8260C318.
+    __imp__sub_8265F720(ctx, base);
+
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[StreamCallback #%d] returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// Hook worker work function (sub_82636BB0) to also pump the streaming callback.
+// The workers have valid PPC contexts and TLS. When they find no work items,
+// they normally just return. We use that opportunity to call the streaming
+// callback which would otherwise deadlock on the main thread.
+extern "C" void __imp__sub_82636BB0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82636BB0) {
+    uint32_t context = ctx.r3.u32;
+    uint32_t item_before = context ? PPC_LOAD_U32(context + 44) : 0;
+    __imp__sub_82636BB0(ctx, base);
+    uint32_t item_after = context ? PPC_LOAD_U32(context + 44) : 0;
+    static int c = 0;
+    if (++c <= 10 || item_after != 0) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[WorkerRun #%d] item: 0x%08X -> 0x%08X\n", c, item_before, item_after); fclose(f); }
+    }
+}
+
+// Hook sub_82604BE8 (IO completion processor) to prevent deadlock.
+// This function calls sub_8260C318 which blocks on synchronous IO.
+// Instead of blocking, call sub_8260C318 on a background thread and
+// return immediately. When the thread completes, it will signal completion.
+// Hook sub_8260C318 - the IO completion function that deadlocks on synchronous IO.
+// It calls sub_8260C420 (init), sub_82623250 (resource lookup), and vtable dispatch.
+// The deadlock is in the resource lookup or vtable dispatch.
+// Stub it to return "not ready" (-1) so the caller retries later.
+extern "C" void __imp__sub_8260C318(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8260C318) {
+    static int c = 0;
+    c++;
+    // Let the first call through (initial setup)
+    if (true) { // passthrough ALL calls (test on main thread)
+        if (c <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOComp #%d] passthrough r3=0x%08X r4=0x%08X r5=0x%08X\n",
+                c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32); fclose(f); }
+        }
+        __imp__sub_8260C318(ctx, base);
+        if (c <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOComp #%d] passthrough returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+        }
+    } else {
+        // Call sub_8260C318 but set r4 (callback context) to a safe non-zero value.
+        // The function stores r4 at stack[156] and later loads it as r29 for a vtable
+        // dispatch. When r4=0, it reads from the null pool and deadlocks.
+        // Set r4 to a known-safe dummy that will cause the vtable check to fail gracefully.
+        // If r4 is non-zero but points to an object with vtable[5]=0, the call is skipped.
+        // Use a null-pool address that returns 0 for all reads.
+        PPCContext io_ctx = ctx;
+        io_ctx.r4.u64 = 0x0F000100; // null pool area - reads return 0
+        __imp__sub_8260C318(io_ctx, base);
+        ctx.r3.u64 = io_ctx.r3.u64;
+        if (c <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOComp #%d] returned r3=%d\n", c, io_ctx.r3.s32); fclose(f); }
+        }
+        static int stub_c = 0;
+        if (++stub_c <= 5 || stub_c % 100 == 0) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOComp #%d] STUB (skip deadlocking IO) r3=0x%08X r4=0x%08X\n",
+                c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+        }
+    }
+}
+
+// Hook sub_8260CC50 - called after IORead, does the actual work
+extern "C" void __imp__sub_8260CC50(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8260CC50) {
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IOWork #%d] r3=0x%08X r4=0x%08X ENTER\n", c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+    }
+    // sub_8260CC50 reads [r4+1] as a thread count. When non-zero, it creates
+    // IO worker threads (KeInitializeSemaphore + ExCreateThread). The second+
+    // call has a non-zero count which tries to re-initialize already-created
+    // threads, causing a deadlock.
+    // Fix: force the thread count byte to 0 so it skips to the actual IO work path.
+    static bool io_initialized = false;
+    if (!io_initialized) {
+        io_initialized = true;
+        __imp__sub_8260CC50(ctx, base);
+    } else {
+        // Run full sub_8260CC50 with ExCreateThread reusing existing handles.
+        // This lets everything run: IODoWork, thread ops (harmless on existing threads),
+        // sub_82604F38 registration loop, and sub_82622CB8 setup.
+        g_skip_thread_creation.store(true);
+        if (c <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOWork #%d] FULL+REUSE r3=0x%08X handles=%d\n",
+                c, ctx.r3.u32, g_io_thread_handle_count); fclose(f); }
+        }
+        __imp__sub_8260CC50(ctx, base);
+        g_skip_thread_creation.store(false);
+        if (c <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOWork #%d] returned r3=%d\n", c, ctx.r3.s32); fclose(f); }
+        }
+    }
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IOWork #%d] returned r3=%d\n", c, ctx.r3.s32); fclose(f); }
+    }
+}
+
+// Hook sub_8260FFC8 - the actual IO work function called from sub_8260CC50.
+// After the first successful call, sub_8260CC50 tries to create 6 IO threads
+// which deadlocks. Return null on 2nd+ calls to skip thread creation.
+extern "C" void __imp__sub_8260FFC8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8260FFC8) {
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IODoWork #%d] r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+    __imp__sub_8260FFC8(ctx, base);
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IODoWork #%d] returned 0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// Hook sub_8260C4F8 - called after BufAlloc succeeds, probably the IO read/completion
+extern "C" void __imp__sub_8260C4F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8260C4F8) {
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IORead #%d] r3=0x%08X r4=0x%08X ENTER\n", c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+    }
+    __imp__sub_8260C4F8(ctx, base);
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IORead #%d] returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// Hook sub_82623408 (buffer allocator, vtable[20]) to find what vtable[16] call blocks
+extern "C" void __imp__sub_82623408(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82623408) {
+    uint32_t obj = ctx.r3.u32;
+    uint32_t size = ctx.r4.u32;
+    uint32_t vtable = obj ? PPC_LOAD_U32(obj) : 0;
+    uint32_t vt16 = vtable ? PPC_LOAD_U32(vtable + 16) : 0;
+    static int c = 0;
+    if (++c <= 30) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BufAlloc #%d] obj=0x%08X size=%u vt[16]=0x%08X\n", c, obj, size, vt16); fclose(f); }
+    }
+    __imp__sub_82623408(ctx, base);
+    if (c <= 30) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[BufAlloc #%d] returned 0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// Hook sub_82623160 (called when obj is null in sub_82623250) — might block
+extern "C" void __imp__sub_82623160(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82623160) {
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[ResNull #%d] ENTER r3=0x%08X r4=0x%08X r5=0x%08X\n", c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32); fclose(f); }
+    }
+    __imp__sub_82623160(ctx, base);
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[ResNull #%d] returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// Hook sub_82623250 to trace vtable calls and find the blocking one
+extern "C" void __imp__sub_82623250(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82623250) {
+    uint32_t hash = ctx.r3.u32;
+    uint32_t data = ctx.r4.u32;
+    uint32_t ctx_ptr = ctx.r5.u32;
+    uint32_t obj = ctx_ptr ? PPC_LOAD_U32(ctx_ptr) : 0;
+    uint32_t vtable = obj ? PPC_LOAD_U32(obj) : 0;
+    uint32_t vt0 = vtable ? PPC_LOAD_U32(vtable + 0) : 0;
+    uint32_t vt8 = vtable ? PPC_LOAD_U32(vtable + 8) : 0;
+    uint32_t vt12 = vtable ? PPC_LOAD_U32(vtable + 12) : 0;
+    static int c = 0;
+    if (++c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "[ResLookup #%d] hash=0x%08X data=0x%08X obj=0x%08X vt=0x%08X fn[0]=0x%08X fn[8]=0x%08X fn[12]=0x%08X\n",
+                c, hash, data, obj, vtable, vt0, vt8, vt12);
+            fclose(f);
+        }
+    }
+    __imp__sub_82623250(ctx, base);
+    // After sub_82623250 returns, [r5] may now point to a newly created object
+    // (sub_82623160 creates it when obj was null). Log the vtable function.
+    uint32_t obj_after = ctx_ptr ? PPC_LOAD_U32(ctx_ptr) : 0;
+    uint32_t vt_after = obj_after ? PPC_LOAD_U32(obj_after) : 0;
+    uint32_t vt5_after = vt_after ? PPC_LOAD_U32(vt_after + 20) : 0;
+    if (c <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[ResLookup #%d] returned r3=0x%08X obj_now=0x%08X vt=0x%08X vt[20]=0x%08X\n",
+            c, ctx.r3.u32, obj_after, vt_after, vt5_after); fclose(f); }
+    }
+}
+
+// Global flag to skip thread creation during IO re-initialization
+std::atomic<bool> g_skip_thread_creation{false};
+
+// Override ExCreateThread to skip during IO re-init.
+// KeInitializeSemaphore can't be overridden (SDK uses templated ppc_ptr_t<X_KSEMAPHORE>).
+namespace rex { namespace kernel { namespace xboxkrnl {
+    extern ppc_u32_result_t ExCreateThread_entry(ppc_pu32_t, ppc_u32_t,
+        ppc_pu32_t, ppc_u32_t, ppc_pvoid_t, ppc_pvoid_t, ppc_u32_t);
+}}}
+
+// Track handles from real ExCreateThread calls for reuse
+static uint32_t g_io_thread_handles[8] = {};
+static int g_io_thread_handle_count = 0;
+
+PPC_FUNC_IMPL(__imp__ExCreateThread) {
+    uint32_t handle_out_addr = ctx.r3.u32;
+
+    if (g_skip_thread_creation.load()) {
+        // Reuse an existing IO thread handle. The caller does:
+        // ObReferenceObjectByHandle → KeSetBasePriorityThread →
+        // KeResumeThread → ObDereferenceObject
+        // All of these are harmless on a valid, already-running thread.
+        if (g_io_thread_handle_count > 0 && handle_out_addr) {
+            // Cycle through captured handles
+            static int reuse_idx = 0;
+            uint32_t reuse_handle = g_io_thread_handles[reuse_idx % g_io_thread_handle_count];
+            reuse_idx++;
+            PPC_STORE_U32(handle_out_addr, reuse_handle);
+            ctx.r3.u64 = 0; // success
+            static int skip_c = 0;
+            if (++skip_c <= 10) {
+                FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                if (f) { fprintf(f, "[ExCreateThread] REUSE #%d handle=0x%08X (of %d)\n",
+                    skip_c, reuse_handle, g_io_thread_handle_count); fclose(f); }
+            }
+        } else {
+            ctx.r3.s64 = -1; // no handles available
+            static int err_c = 0;
+            if (++err_c <= 3) {
+                FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                if (f) { fprintf(f, "[ExCreateThread] NO HANDLES (count=%d)\n", g_io_thread_handle_count); fclose(f); }
+            }
+        }
+        return;
+    }
+
+    // Real thread creation — capture handle for reuse
+    rex::HostToGuestFunction<rex::kernel::xboxkrnl::ExCreateThread_entry>(ctx, base);
+    if (ctx.r3.u32 == 0 && handle_out_addr && g_io_thread_handle_count < 8) {
+        uint32_t new_handle = PPC_LOAD_U32(handle_out_addr);
+        if (new_handle) {
+            g_io_thread_handles[g_io_thread_handle_count++] = new_handle;
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[ExCreateThread] CAPTURED handle=0x%08X (total=%d)\n",
+                new_handle, g_io_thread_handle_count); fclose(f); }
+        }
+    }
 }
 
 // Hook XamLoaderTerminateTitle to catch game exits
