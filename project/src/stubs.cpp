@@ -452,7 +452,7 @@ PPC_FUNC(sub_8262FFE0) {
     static int render_count = 0;
     if (skip_flag != 0) skip_count++;
     else render_count++;
-    if (_c <= 10 || (_c % 100 == 0)) {
+    if (_c <= 10 || (_c >= 50 && _c <= 100) || (_c % 100 == 0)) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
             fprintf(f, "[GL2_Render #%d] skip=%u render_skip=%u frames=%u (rendered=%d skipped=%d)\n",

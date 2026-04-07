@@ -392,11 +392,12 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     // Also handle 0x80000000-0x8FFFFFFF (XEX heap) and other guest ranges
     else if (fault_addr >= 0x100000000ull && fault_addr < 0x200000000ull) {
         uint32_t guest_addr = (uint32_t)(fault_addr - 0x100000000ull);
-        // Treat low guest addresses (< 0x200000) as null-like.
-        // The game sometimes chases pointer chains through low addresses
-        // (e.g., 0x50000 → 0xA0000 → 0x130000...) which are invalid on 360.
-        // Demand-paging these wastes memory and can cause recursive AVs.
-        if (guest_addr < 0x200000) {
+        // Treat low guest addresses (< 0x10000000 = 256MB) as null-like.
+        // The game chases null pointer chains through progressively higher
+        // addresses. On Xbox 360, game code is at 0x82000000+ and heap at
+        // 0x40000000+. Anything below 0x10000000 is system/kernel space.
+        // Don't demand-page these - treat as null pointer dereferences.
+        if (guest_addr < 0x10000000) {
             goto null_page_handler;
         }
         // Don't demand-page the GPU MMIO range (0x7FC80000-0x7FCFFFFF)
