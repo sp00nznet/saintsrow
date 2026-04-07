@@ -452,7 +452,7 @@ PPC_FUNC(sub_8262FFE0) {
     static int render_count = 0;
     if (skip_flag != 0) skip_count++;
     else render_count++;
-    if (_c <= 30 || (_c % 300 == 0)) {
+    if (_c <= 10 || (_c % 100 == 0)) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
             fprintf(f, "[GL2_Render #%d] skip=%u render_skip=%u frames=%u (rendered=%d skipped=%d)\n",
@@ -460,6 +460,12 @@ PPC_FUNC(sub_8262FFE0) {
             fclose(f);
         }
     }
+    // Clear flags that gate bad indirect calls in the game loop.
+    // Multiple bctrl instructions read function pointers that are null/invalid
+    // because physics/world systems are stubbed.
+    PPC_STORE_U8(0x8370E9DF, 0);
+    PPC_STORE_U8(0x8370E9F6, 0);
+
     __imp__sub_8262FFE0(ctx, base);
 }
 TRACE_STATE("RenderD", 82636688)
@@ -543,14 +549,22 @@ PPC_FUNC(sub_82604C10) {
 }
 TRACE_CALL("CreateThr", 82716028)
 TRACE_CALL("WaitThr", 82716038)
-// sub_82185498 (PostLoop5) - Previously crashed. Try running it now with
-// all IO/threading/audio fixes in place.
+// sub_82185498 (PostLoop5) - main game loop containing GL2_Render.
+// Runs for real now. Previously crashed from bad vtable dispatches.
 extern "C" void __imp__sub_82185498(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82185498) {
     static int c = 0;
     c++;
     if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[PostLoop5] ENTER #%d r3=0x%08X r30=0x%08X\n", c, ctx.r3.u32, ctx.r30.u32); fclose(f); } }
+
+
+    // Clear the flag at 0x8370E9DF to prevent a bad indirect call at PPC 0x82186EE0.
+    // This bctrl reads [r31] as a function pointer, which is often null/invalid
+    // when game world systems (physics, etc.) aren't fully initialized.
+    // The flag guards: if [0x8370E9DF] != 1, skip the call. Force it to 0.
+    PPC_STORE_U8(0x8370E9DF, 0);
+
     __imp__sub_82185498(ctx, base);
     if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[PostLoop5] EXIT #%d r3=0x%08X\n", c, ctx.r3.u32); fclose(f); } }

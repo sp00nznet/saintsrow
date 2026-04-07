@@ -76,7 +76,7 @@ endif()
 
 # Allow our stubs to override kernel functions
 if(WIN32)
-    target_link_options(saintsrow PRIVATE "LINKER:/force:multiple")
+    target_link_options(saintsrow PRIVATE "LINKER:/force:multiple" "LINKER:/STACK:16777216")
 endif()
 
 # Console test executable (no GUI, no GPU)

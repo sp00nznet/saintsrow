@@ -128,14 +128,85 @@ static void InitNullObjectPage(uint8_t* membase) {
 }
 
 // Null-page access handler
+// Fast-path cache: known-bad instruction addresses that always need the same
+// handling (skip + zero RAX). Avoids the full VEH decode path for hot exceptions.
+static constexpr int BAD_RIP_CACHE_SIZE = 32;
+static uint64_t g_bad_rip_cache[BAD_RIP_CACHE_SIZE] = {};
+static uint8_t g_bad_rip_skip[BAD_RIP_CACHE_SIZE] = {};  // instruction length to skip
+static int g_bad_rip_count = 0;
+
 static thread_local int g_veh_depth = 0;
 static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
+    // Log any non-AV exceptions (stack overflow, guard page, etc.)
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
+        ep->ExceptionRecord->ExceptionCode != EXCEPTION_BREAKPOINT &&
+        ep->ExceptionRecord->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION) {
+        static int other_exc = 0;
+        if (++other_exc <= 10) {
+            FILE* ef = fopen("saintsrow_all_crashes.log", "a");
+            if (ef) {
+                fprintf(ef, "[EXCEPTION] code=0x%08lX RIP=0x%llX addr=0x%llX TID=%lu\n",
+                    ep->ExceptionRecord->ExceptionCode,
+                    (unsigned long long)ep->ContextRecord->Rip,
+                    (unsigned long long)(ep->ExceptionRecord->NumberParameters > 1 ?
+                        ep->ExceptionRecord->ExceptionInformation[1] : 0),
+                    GetCurrentThreadId());
+                fclose(ef);
+            }
+        }
+        // Handle stack overflow by expanding the stack guard page
+        if (ep->ExceptionRecord->ExceptionCode == 0xC00000FD) { // STATUS_STACK_OVERFLOW
+            return EXCEPTION_CONTINUE_SEARCH; // Let OS handle it
+        }
+    }
+
     // Prevent recursive exception handling (stack overflow from cascading AVs)
     if (g_veh_depth > 0) {
         ep->ContextRecord->Rip += 1;
         ep->ContextRecord->Rax = 0;
         return EXCEPTION_CONTINUE_EXECUTION;
     }
+
+    // Fast path: check if this RIP is in the known-bad cache
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        auto fault = ep->ExceptionRecord->ExceptionInformation[1];
+        uint64_t rip = ep->ContextRecord->Rip;
+
+        // Ultra-fast path for the known bad vtable at 0x8000001E.
+        // This is a C++ vtable dispatch where a game object has a corrupted
+        // vtable pointer. Thousands of these per frame from game objects
+        // without proper world data (physics/etc stubbed).
+        if (fault == 0x8000001E) {
+            // Skip the call instruction (7 bytes for call [mem] with SIB+disp)
+            uint8_t* ip = (uint8_t*)rip;
+            int ci = 0;
+            if ((ip[ci] & 0xF0) == 0x40) ci++; // REX
+            if (ip[ci] == 0xFF) {
+                uint8_t modrm = ip[ci + 1];
+                int oplen = ci + 2;
+                int mod = modrm >> 6;
+                int rm = modrm & 7;
+                if (rm == 4 && mod != 3) oplen += 1; // SIB
+                if (mod == 0 && rm == 5) oplen += 4;
+                else if (mod == 1) oplen += 1;
+                else if (mod == 2) oplen += 4;
+                ep->ContextRecord->Rip += oplen;
+            } else {
+                ep->ContextRecord->Rip += 1;
+            }
+            ep->ContextRecord->Rax = 0;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+
+        for (int i = 0; i < g_bad_rip_count; i++) {
+            if (g_bad_rip_cache[i] == rip) {
+                ep->ContextRecord->Rip += g_bad_rip_skip[i];
+                ep->ContextRecord->Rax = 0;
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+        }
+    }
+
     g_veh_depth++;
     struct VEHGuard { ~VEHGuard() { g_veh_depth--; } } guard;
 
@@ -384,6 +455,20 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
                 if (mod == 0 && crm == 5) oplen += 4;  // RIP-relative
                 else if (mod == 1) oplen += 1;  // disp8
                 else if (mod == 2) oplen += 4;  // disp32
+                // Cache this RIP for fast-path handling on repeat calls
+                uint64_t orig_rip = (uint64_t)call_ip;
+                if (g_bad_rip_count < BAD_RIP_CACHE_SIZE) {
+                    bool found = false;
+                    for (int ci2 = 0; ci2 < g_bad_rip_count; ci2++) {
+                        if (g_bad_rip_cache[ci2] == orig_rip) { found = true; break; }
+                    }
+                    if (!found) {
+                        g_bad_rip_cache[g_bad_rip_count] = orig_rip;
+                        g_bad_rip_skip[g_bad_rip_count] = (uint8_t)oplen;
+                        g_bad_rip_count++;
+                    }
+                }
+
                 ep->ContextRecord->Rip += oplen;
                 ep->ContextRecord->Rax = 0;
                 static int bad_call_count = 0;
@@ -391,8 +476,34 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
                     FILE* bf = fopen("saintsrow_all_crashes.log", "a");
                     if (bf) {
                         fprintf(bf, "[BAD-CALL] call [mem] at RIP+0x%llX fault_addr=0x%llX -- skipped (%d bytes)\n",
-                            (unsigned long long)(ep->ContextRecord->Rip - oplen - (uint64_t)call_ip + (uint64_t)call_ip),
+                            (unsigned long long)(ep->ContextRecord->Rip - oplen),
                             (unsigned long long)fault_addr, oplen);
+                        fclose(bf);
+                    }
+                }
+                // On first BAD-CALL, dump PPC stack trace to identify the function
+                if (bad_call_count == 1) {
+                    FILE* bf = fopen("saintsrow_all_crashes.log", "a");
+                    if (bf) {
+                        void* frames[32];
+                        WORD nframes = CaptureStackBackTrace(0, 32, frames, NULL);
+                        HMODULE exe = GetModuleHandleA(NULL);
+                        MODULEINFO mi = {};
+                        GetModuleInformation(GetCurrentProcess(), exe, &mi, sizeof(mi));
+                        uint64_t exe_base = (uint64_t)mi.lpBaseOfDll;
+                        uint64_t exe_end = exe_base + mi.SizeOfImage;
+                        fprintf(bf, "[BAD-CALL-STACK] exe_base=0x%llX:\n", (unsigned long long)exe_base);
+                        for (int fi = 0; fi < nframes && fi < 20; fi++) {
+                            uint64_t addr = (uint64_t)frames[fi];
+                            if (addr >= exe_base && addr < exe_end) {
+                                fprintf(bf, "  [%d] exe+0x%llX\n", fi, (unsigned long long)(addr - exe_base));
+                            }
+                        }
+                        fprintf(bf, "  Registers: RAX=0x%llX RBX=0x%llX RSI=0x%llX RDI=0x%llX\n",
+                            (unsigned long long)ep->ContextRecord->Rax,
+                            (unsigned long long)ep->ContextRecord->Rbx,
+                            (unsigned long long)ep->ContextRecord->Rsi,
+                            (unsigned long long)ep->ContextRecord->Rdi);
                         fclose(bf);
                     }
                 }
@@ -590,6 +701,19 @@ null_page_handler:
         else if (op == 0x81 || op == 0xC7) insn_len += 4;  // imm32
         else if (op == 0xF6) insn_len += ((modrm >> 3) & 7) < 2 ? 1 : 0;  // TEST has imm8
         else if (op == 0xF7) insn_len += ((modrm >> 3) & 7) < 2 ? 4 : 0;  // TEST has imm32
+
+        // Cache this RIP for fast-path handling
+        if (g_bad_rip_count < BAD_RIP_CACHE_SIZE) {
+            bool found = false;
+            for (int ci3 = 0; ci3 < g_bad_rip_count; ci3++) {
+                if (g_bad_rip_cache[ci3] == (uint64_t)rip) { found = true; break; }
+            }
+            if (!found) {
+                g_bad_rip_cache[g_bad_rip_count] = (uint64_t)rip;
+                g_bad_rip_skip[g_bad_rip_count] = (uint8_t)insn_len;
+                g_bad_rip_count++;
+            }
+        }
 
         ep->ContextRecord->Rip += insn_len;
         return EXCEPTION_CONTINUE_EXECUTION;
