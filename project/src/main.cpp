@@ -128,7 +128,20 @@ static void InitNullObjectPage(uint8_t* membase) {
 }
 
 // Null-page access handler
+static thread_local int g_veh_depth = 0;
 static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
+    // Prevent recursive exception handling (stack overflow from cascading AVs)
+    if (g_veh_depth > 0) {
+        ep->ContextRecord->Rip += 1;
+        ep->ContextRecord->Rax = 0;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    g_veh_depth++;
+    struct VEHGuard { ~VEHGuard() { g_veh_depth--; } } guard;
+
+    // Note: no global rate limiter here - demand paging generates
+    // thousands of legitimate exceptions during loading.
+
     // For null page faults, try to identify the PPC function
     // by checking return addresses in the stack against the function mapping table
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
@@ -234,11 +247,42 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         ep->ContextRecord->Rsp += 8;     // Adjust stack
         ep->ContextRecord->Rax = 0;      // Return 0
         static int null_call_count = 0;
-        if (++null_call_count <= 20) {
+        static uint64_t last_ret_addr = 0;
+        static int repeat_count = 0;
+        uint64_t ret_addr = ep->ContextRecord->Rip;
+
+        if (ret_addr == last_ret_addr) {
+            repeat_count++;
+            if (repeat_count > 20) {
+                // Tight loop calling null. Return non-zero to break loop conditions.
+                ep->ContextRecord->Rax = 1;
+                // After 100 repeats, skip the calling function entirely by
+                // popping another return address (simulate returning from the caller)
+                if (repeat_count > 100) {
+                    uint64_t* rsp = (uint64_t*)ep->ContextRecord->Rsp;
+                    ep->ContextRecord->Rip = rsp[0];
+                    ep->ContextRecord->Rsp += 8;
+                }
+                if (repeat_count <= 25 || repeat_count == 101) {
+                    FILE* nf = fopen("saintsrow_all_crashes.log", "a");
+                    if (nf) {
+                        fprintf(nf, "[NULL-CALL-LOOP] breaking at ret=0x%llX (repeat=%d%s)\n",
+                            (unsigned long long)ret_addr, repeat_count,
+                            repeat_count > 100 ? " FORCE-RET" : "");
+                        fclose(nf);
+                    }
+                }
+            }
+        } else {
+            last_ret_addr = ret_addr;
+            repeat_count = 0;
+        }
+        null_call_count++;
+        if (null_call_count <= 20) {
             FILE* nf = fopen("saintsrow_all_crashes.log", "a");
             if (nf) {
                 fprintf(nf, "[NULL-CALL] call to 0x%llX, returning to 0x%llX with RAX=0\n",
-                    (unsigned long long)fault_rip, (unsigned long long)ep->ContextRecord->Rip);
+                    (unsigned long long)fault_rip, (unsigned long long)ret_addr);
                 fclose(nf);
             }
         }
@@ -276,11 +320,12 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     // Guest range 0xA0000000-0xBFFFFFFF maps to host 0x1A0000000-0x1BFFFFFFF
     // Also handle 0x80000000-0x8FFFFFFF (XEX heap) and other guest ranges
     else if (fault_addr >= 0x100000000ull && fault_addr < 0x200000000ull) {
-        // Don't demand-page guest address 0 (null page should remain invalid)
         uint32_t guest_addr = (uint32_t)(fault_addr - 0x100000000ull);
-        if (guest_addr < 0x10000) {
-            // This is a null page access via membase translation - treat as null deref
-            // Fall through to the instruction decoder below
+        // Treat low guest addresses (< 0x200000) as null-like.
+        // The game sometimes chases pointer chains through low addresses
+        // (e.g., 0x50000 → 0xA0000 → 0x130000...) which are invalid on 360.
+        // Demand-paging these wastes memory and can cause recursive AVs.
+        if (guest_addr < 0x200000) {
             goto null_page_handler;
         }
         // Don't demand-page the GPU MMIO range (0x7FC80000-0x7FCFFFFF)
@@ -318,6 +363,17 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
             uint8_t modrm = call_ip[ci + 1];
             int reg_field = (modrm >> 3) & 7;
             if (reg_field == 2 || reg_field == 3) {  // CALL or CALLF
+                // Detect tight BAD-CALL loops (same RIP repeating)
+                // Don't force-return too aggressively - some game loops
+                // legitimately call through bad pointers many times per frame.
+                static uint64_t last_bad_rip = 0;
+                static int bad_repeat = 0;
+                if ((uint64_t)call_ip == last_bad_rip) {
+                    bad_repeat++;
+                } else {
+                    last_bad_rip = (uint64_t)call_ip;
+                    bad_repeat = 0;
+                }
                 // The fault is from reading the call target from memory
                 // (e.g. call [rsi+rax*2]). The call hasn't pushed a return
                 // address yet - skip the entire call instruction and set RAX=0.
@@ -443,7 +499,10 @@ null_page_handler:
                op == 0x03 || op == 0x01 || op == 0x2B || op == 0x29 ||  // ADD/SUB
                op == 0x23 || op == 0x21 || op == 0x0B || op == 0x09 ||  // AND/OR
                op == 0x33 || op == 0x31 ||  // XOR
-               op == 0x80 || op == 0x81 || op == 0x83 ||  // Immediate ops
+               op == 0x80 || op == 0x81 || op == 0x83 ||  // Immediate ops (ALU r/m, imm)
+               op == 0xC6 || op == 0xC7 ||  // MOV r/m, imm8/imm32 (stores)
+               op == 0xF6 || op == 0xF7 ||  // TEST/NOT/NEG/MUL/DIV r/m
+               op == 0xFE || op == 0xFF ||  // INC/DEC/CALL/JMP r/m
                op == 0x86 || op == 0x87) {  // XCHG
         has_modrm = true; oplen = 1;
     }
@@ -527,8 +586,10 @@ null_page_handler:
         else if (mod == 2) insn_len += 4;  // disp32
 
         // Add immediate operand size for certain opcodes
-        if (op == 0x80 || op == 0x83) insn_len += 1;  // imm8
-        else if (op == 0x81) insn_len += 4;  // imm32
+        if (op == 0x80 || op == 0x83 || op == 0xC6) insn_len += 1;  // imm8
+        else if (op == 0x81 || op == 0xC7) insn_len += 4;  // imm32
+        else if (op == 0xF6) insn_len += ((modrm >> 3) & 7) < 2 ? 1 : 0;  // TEST has imm8
+        else if (op == 0xF7) insn_len += ((modrm >> 3) & 7) < 2 ? 4 : 0;  // TEST has imm32
 
         ep->ContextRecord->Rip += insn_len;
         return EXCEPTION_CONTINUE_EXECUTION;
