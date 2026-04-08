@@ -208,12 +208,12 @@ extern "C" void __imp__sub_827166C0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82653F98) {
     static int c = 0;
     c++;
-    if (c <= 10) {
+    if (c <= 10 || c % 500 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[SceneTick #%d] ENTER\n", c); fclose(f); }
+        if (f) { fprintf(f, "[SceneTick #%d] ENTER state=%u\n", c, PPC_LOAD_U32(0x8370DD7C)); fclose(f); }
     }
     __imp__sub_82653F98(ctx, base);
-    if (c <= 10) {
+    if (c <= 10 || c % 500 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[SceneTick #%d] EXIT\n", c); fclose(f); }
     }
@@ -1128,6 +1128,12 @@ static std::atomic<int> g_input_frame{0};
 PPC_FUNC_IMPL(__imp__XamInputGetState) {
     uint32_t user = ctx.r3.u32;
     uint32_t state_ptr = ctx.r5.u32;
+    static int gs_call = 0;
+    gs_call++;
+    if (gs_call <= 5 || gs_call % 500 == 0) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[XamInputGetState #%d] user=%u state_ptr=0x%08X\n", gs_call, user, state_ptr); fclose(f); }
+    }
     if (user != 0) {
         ctx.r3.u64 = 0x80070481; // NOT_CONNECTED for users 1-3
         return;
@@ -1136,30 +1142,30 @@ PPC_FUNC_IMPL(__imp__XamInputGetState) {
     if (state_ptr) {
         for (int i = 0; i < 8; i++) PPC_STORE_U32(state_ptr + i*4, 0);
     }
-    // Check game state - press buttons after loading
+    // Return connected controller and simulate button presses after loading
     uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
-    if (game_state >= 3 && state_ptr) {
+    if (user == 0 && state_ptr) {
         int frame = g_input_frame.fetch_add(1);
-        uint16_t buttons = 0;
-        // Press Start at frame 30-35, then A at frame 60-65
-        // (brief pulses to simulate button presses, then release)
-        if ((frame >= 30 && frame < 35) || (frame >= 120 && frame < 125)) {
-            buttons = 0x0010; // XINPUT_GAMEPAD_START
-        } else if ((frame >= 60 && frame < 65) || (frame >= 150 && frame < 155)) {
-            buttons = 0x1000; // XINPUT_GAMEPAD_A
+        // Log first few post-load calls
+        static int log_u0 = 0;
+        if (game_state >= 3 && ++log_u0 <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[InputState] user=0 frame=%d state=%u ptr=0x%08X\n", frame, game_state, state_ptr); fclose(f); }
         }
-        if (buttons) {
-            // Write buttons as big-endian uint16 at offset 4
-            PPC_STORE_U16(state_ptr + 4, buttons);
-            static int btn_c = 0;
-            if (++btn_c <= 10) {
-                FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                if (f) { fprintf(f, "[Input] frame=%d buttons=0x%04X\n", frame, buttons); fclose(f); }
+        // Continuously press Start button to skip attract mode
+        // and A button to confirm menu selections
+        if (game_state >= 3) {
+            // Alternate: Start for 10 frames, nothing for 20, A for 10, nothing for 20
+            int cycle = frame % 60;
+            uint16_t buttons = 0;
+            if (cycle < 10) buttons = 0x0010;     // START
+            else if (cycle >= 30 && cycle < 40) buttons = 0x1000;  // A
+            if (buttons) {
+                PPC_STORE_U16(state_ptr + 4, buttons);
             }
+            // Always set packet number
+            PPC_STORE_U32(state_ptr, (uint32_t)frame);
         }
-        // Increment packet number so game detects change
-        static uint32_t pkt = 1;
-        PPC_STORE_U32(state_ptr, pkt++);
     }
     ctx.r3.u64 = 0; // X_ERROR_SUCCESS (connected)
 }
