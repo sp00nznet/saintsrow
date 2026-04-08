@@ -142,7 +142,7 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
         ep->ExceptionRecord->ExceptionCode != EXCEPTION_BREAKPOINT &&
         ep->ExceptionRecord->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION) {
         static int other_exc = 0;
-        if (++other_exc <= 10) {
+        if (++other_exc <= 20) {
             FILE* ef = fopen("saintsrow_all_crashes.log", "a");
             if (ef) {
                 fprintf(ef, "[EXCEPTION] code=0x%08lX RIP=0x%llX addr=0x%llX TID=%lu\n",
@@ -154,9 +154,28 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
                 fclose(ef);
             }
         }
-        // Handle stack overflow by expanding the stack guard page
-        if (ep->ExceptionRecord->ExceptionCode == 0xC00000FD) { // STATUS_STACK_OVERFLOW
-            return EXCEPTION_CONTINUE_SEARCH; // Let OS handle it
+        // Thread naming exception (SetThreadName) - pass through
+        if (ep->ExceptionRecord->ExceptionCode == 0x406D1388) {
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        // C++ exception (0xE06D7363 = "msc") - from SDK assertions or D3D12 errors.
+        // Don't let these crash the process - absorb them.
+        if (ep->ExceptionRecord->ExceptionCode == 0xE06D7363) {
+            static int cpp_exc = 0;
+            if (++cpp_exc <= 5) {
+                FILE* ef = fopen("saintsrow_all_crashes.log", "a");
+                if (ef) {
+                    fprintf(ef, "[CPP-EXCEPTION #%d] TID=%lu -- absorbed\n", cpp_exc, GetCurrentThreadId());
+                    fclose(ef);
+                }
+            }
+            // Can't easily absorb a C++ exception from VEH. Let it propagate
+            // but the catch blocks in the SDK should handle it.
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        // Stack overflow
+        if (ep->ExceptionRecord->ExceptionCode == 0xC00000FD) {
+            return EXCEPTION_CONTINUE_SEARCH;
         }
     }
 

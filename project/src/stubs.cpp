@@ -782,46 +782,9 @@ PPC_FUNC(sub_825D3580) {
 
             cp->UpdateWritePointer(prim_write_pos);
 
-            // Execute ALL pending PM4 directly on the CP thread.
-            // The primary ring buffer processing may not be working.
-            // Execute: 1) the render IB, 2) the kick IB
-            uint32_t exec_render_phys = 0;
-            uint32_t exec_render_dwords = 0;
-            if (last_ib_end > 0 && last_ib_end < r4) {
-                // Find the render PM4 physical address
-                uint32_t scan_start = last_ib_end;
-                uint32_t scan_len = (r4 - scan_start) / 4;
-                uint32_t pm4_start = 0;
-                while (pm4_start < scan_len && PPC_LOAD_U32(scan_start + pm4_start * 4) == 0) pm4_start++;
-                if (pm4_start < scan_len) {
-                    exec_render_phys = ks->memory()->GetPhysicalAddress(scan_start + pm4_start * 4);
-                    exec_render_dwords = scan_len - pm4_start;
-                }
-            }
-            cp->CallInThread([cp, phys_kick, exec_render_phys, exec_render_dwords]() {
-                static int exec_c = 0;
-                exec_c++;
-                if (exec_render_phys && exec_render_dwords > 0 && exec_render_dwords < 50000) {
-                    if (exec_c <= 3) {
-                        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                        if (f) { fprintf(f, "[ExecPM4 #%d] render phys=0x%08X dwords=%u\n", exec_c, exec_render_phys, exec_render_dwords); fclose(f); }
-                    }
-                    cp->ExecutePacket(exec_render_phys, exec_render_dwords);
-                    if (exec_c <= 3) {
-                        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                        if (f) { fprintf(f, "[ExecPM4 #%d] render DONE\n", exec_c); fclose(f); }
-                    }
-                }
-                if (exec_c <= 3) {
-                    FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                    if (f) { fprintf(f, "[ExecPM4 #%d] kick phys=0x%08X\n", exec_c, phys_kick); fclose(f); }
-                }
-                cp->ExecutePacket(phys_kick, 10);
-                if (exec_c <= 3) {
-                    FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                    if (f) { fprintf(f, "[ExecPM4 #%d] kick DONE\n", exec_c); fclose(f); }
-                }
-            });
+            // The ring buffer + UpdateWritePointer should trigger the CP thread
+            // to process commands. Direct ExecutePacket was causing C++ exceptions
+            // from SDK assertions on the GPU thread.
 
             static int ib_c = 0;
             if (++ib_c <= 5) {
