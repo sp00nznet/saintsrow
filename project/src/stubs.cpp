@@ -1015,44 +1015,7 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
         // The kick function (sub_825D3580) handles UpdateWritePointer
         // by appending INDIRECT_BUFFER_PFD to the primary ring buffer.
 
-        // Write a test pattern to the framebuffer to verify display pipeline.
-        // The framebuffer at 0x09258000 is a 1280x720 RGBA8 tiled texture.
-        // Xbox 360 uses a specific tiling pattern, but for testing, just write
-        // a gradient pattern to the PHYSICAL memory backing the texture.
-        // The texture cache will pick it up on the next IssueSwap.
-        {
-            auto* mem = ks->memory();
-            // Write directly to PHYSICAL memory (what the GPU texture cache reads)
-            uint8_t* fb_host = mem->TranslatePhysical(fb_phys);
-            static int frame_num = 0;
-            frame_num++;
-
-            // Write a simple color gradient - each frame slightly different
-            // Xbox 360 textures are tiled, so this won't look right geometrically,
-            // but ANY non-black color proves the display pipeline works.
-            // Write pure white to the framebuffer. Any byte order should show as white.
-            uint32_t color = 0xFFFFFFFF;
-            // Fill a portion of the framebuffer with the color
-            // Framebuffer is 1280*720*4 = 3,686,400 bytes
-            uint32_t* fb32 = (uint32_t*)fb_host;
-            if (fb32) {
-                for (uint32_t i = 0; i < 1280 * 720; i++) {
-                    fb32[i] = color;
-                }
-                // Verify write and log
-                static int fb_log = 0;
-                if (++fb_log <= 3) {
-                    FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                    if (f) {
-                        fprintf(f, "[FB-Write #%d] host=%p phys=0x%08X color=0x%08X readback=0x%08X\n",
-                            fb_log, (void*)fb_host, fb_phys, color, fb32[0]);
-                        fclose(f);
-                    }
-                }
-            }
-            // Invalidate texture cache so GPU picks up our changes
-            cp->InvalidateGpuMemory();
-        }
+        // Test pattern removed - let the GPU's actual rendering show through.
 
         // Log fetch constants for debugging black screen
         static int fetch_log = 0;

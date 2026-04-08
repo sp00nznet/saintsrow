@@ -891,6 +891,17 @@ public:
         window_->Open();
         runtime_->set_display_window(window_.get());
 
+        // Connect the GPU presenter to the window surface.
+        // Without this, the D3D12 swap chain is never created for the window
+        // and Present() never reaches the screen.
+        auto* gs = static_cast<rex::graphics::GraphicsSystem*>(runtime_->graphics_system());
+        if (gs && gs->presenter()) {
+            window_->SetPresenter(gs->presenter());
+            REXLOG_INFO("Presenter connected to window");
+        } else {
+            REXLOG_ERROR("No presenter available to connect to window");
+        }
+
         // Launch module
         app_context().CallInUIThreadDeferred([this]() {
             auto main_thread = runtime_->LaunchModule();
