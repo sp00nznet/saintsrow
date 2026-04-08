@@ -1,0 +1,370 @@
+[2026-03-21 22:29:20.112] [info] [core] [t1403172] Saints Row starting
+[2026-03-21 22:29:20.112] [info] [core] [t1403172]   Game directory: D:/recomp/360/saintsrow/extracted
+[2026-03-21 22:29:20.118] [info] [sys] [t1403172] FunctionDispatcher initialized
+[2026-03-21 22:29:20.118] [info] [core] [t1403172] SDL: Using version 3.5.0
+[2026-03-21 22:29:20.119] [info] [core] [t1403172] MnK input driver initialized
+[2026-03-21 22:29:20.119] [info] [sys] [t1403172] Input system initialized
+[2026-03-21 22:29:20.155] [info] [sys] [t1403172] Audio system initialized
+[2026-03-21 22:29:20.160] [info] [sys] [t1403108] XThread::Execute thid 1 (handle=F800000C, 'XMA Decoder (F800000C)', native=001568E4, <host>)
+[2026-03-21 22:29:20.162] [info] [sys] [t1399464] XThread::Execute thid 2 (handle=F8000010, 'Audio Worker (F8000010)', native=00155AA8, <host>)
+[2026-03-21 22:29:20.163] [info] [sys] [t1403172]   Mounted D:\recomp\360\saintsrow\extracted at \Device\Harddisk0\Partition1
+[2026-03-21 22:29:20.341] [info] [gpu] [t1403172] DXGI adapter: NVIDIA GeForce RTX 5070 (vendor 0x10DE, device 0x2F04)
+[2026-03-21 22:29:20.530] [info] [gpu] [t1403172] Direct3D 12 device and OS features:
+* Max GPU virtual address bits per resource: 40
+* Non-zeroed heap creation: yes
+* Pixel-shader-specified stencil reference: no
+* Programmable sample positions: tier 2
+* Rasterizer-ordered views: yes
+* Resource binding: tier 3
+* Tiled resources: tier 4
+* Unaligned block-compressed textures: yes
+[2026-03-21 22:29:20.534] [info] [sys] [t1394448] XThread::Execute thid 3 (handle=F8000014, 'GPU Commands (F8000014)', native=00154710, <host>)
+[2026-03-21 22:29:20.534] [info] [sys] [t1403172] GPU system initialized (presentation=true)
+[2026-03-21 22:29:20.534] [info] [sys] [t1403188] XThread::Execute thid 4 (handle=F8000018, 'GPU VSync (F8000018)', native=00156934, <host>)
+[2026-03-21 22:29:20.534] [info] [sys] [t1403172] Runtime initialized successfully
+[2026-03-21 22:29:20.540] [info] [core] [t1403172] FunctionDispatcher function table initialized: code=820B0000-82799724, image=82000000-84160000
+[2026-03-21 22:29:20.543] [info] [core] [t1403172] Memory heap for 0x82000000: VALID
+[2026-03-21 22:29:20.543] [info] [core] [t1403172]   Heap page_size=65536, host_offset=0x0
+[2026-03-21 22:29:20.544] [info] [core] [t1403172]   TranslateVirtual(0x82000000) = 0x182000000
+[2026-03-21 22:29:20.544] [info] [core] [t1403172]   Test AllocFixed: OK
+[2026-03-21 22:29:20.544] [info] [core] [t1403172]   Test write: OK (read back: 0x42)
+[2026-03-21 22:29:20.545] [info] [sys] [t1403172] Loading XEX image: game:\default.xex
+[2026-03-21 22:29:20.545] [info] [fs] [t1403172] VFS: 'game:\default.xex' -> '\Device\Harddisk0\Partition1\default.xex' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\default.xex'
+[2026-03-21 22:29:20.596] [warning] [fs] [t1403172] VFS: '\Device\Harddisk0\Partition1\default.xexp' -> '(no symlink)' -> device '\Device\Harddisk0\Partition1' -> [entry not found]
+[2026-03-21 22:29:20.599] [info] [core] [t1403172] XEX image loaded successfully!
+[2026-03-21 22:29:20.599] [info] [core] [t1403172] Null page handler registered
+[2026-03-21 22:29:20.599] [info] [core] [t1403172] XEX fully loaded. Attempting window creation...
+[2026-03-21 22:29:20.600] [info] [sys] [t1402332] XThread::Execute thid 5 (handle=F8000020, 'Kernel Dispatch (F8000020)', native=001565DC, <host>)
+[2026-03-21 22:29:20.697] [info] [sys] [t1403172] KernelState: Launching module...
+[2026-03-21 22:29:20.719] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.719] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.721] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.721] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.721] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.722] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.722] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.722] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.722] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.723] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.723] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.723] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.724] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.724] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.724] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.725] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.725] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.725] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.725] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.726] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.726] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.726] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.726] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.727] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.727] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.727] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.727] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.727] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.728] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.728] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.728] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.728] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.729] [info] [gpu] [t1398132] SetInterruptCallback(825D3BA0, 40001E00)
+[2026-03-21 22:29:20.729] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.729] [info] [gpu] [t1394448] Generated vertex shader (108b) - hash 0A6D1DD7767FDF27:
+/*    0.0 */       exec
+/*    3   */          vfetch_full r1.xyz1, r0.x, vf95, DataFormat=FMT_32_32_32_FLOAT, Stride=7, Signed=true, NumFormat=integer, PrefetchCount=7
+/*    4   */          vfetch_mini r0, Offset=3, DataFormat=FMT_32_32_32_32_FLOAT, Signed=true, NumFormat=integer
+/*    0.1 */       alloc interpolators
+/*    1.0 */       exec
+/*    5   */          max o0, r0, r0
+/*    1.1 */       alloc position
+/*    2.0 */       exec
+/*    6   */          max oPos, r1, r1
+/*    2.1 */       exece
+/*    7   */          max r0._, c0, c0
+
+
+[2026-03-21 22:29:20.730] [info] [gpu] [t1394448] Creating graphics pipeline with VS 0A6D1DD7767FDF27
+[2026-03-21 22:29:20.730] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.730] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.730] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.730] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.731] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.731] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.732] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.732] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.732] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.738] [info] [gpu] [t1394448] Created a 1280x2048 1xMSAA color render target with guest format 0 at EDRAM base 0
+[2026-03-21 22:29:20.739] [info] [gpu] [t1394448] Created a 1280x2048 1xMSAA depth render target with guest format 1 at EDRAM base 720
+[2026-03-21 22:29:20.739] [info] [gpu] [t1371368] Generated vertex shader (108b) - hash 0A6D1DD7767FDF27:
+/*    0.0 */       exec
+/*    3   */          vfetch_full r1.xyz1, r0.x, vf95, DataFormat=FMT_32_32_32_FLOAT, Stride=7, Signed=true, NumFormat=integer, PrefetchCount=7
+/*    4   */          vfetch_mini r0, Offset=3, DataFormat=FMT_32_32_32_32_FLOAT, Signed=true, NumFormat=integer
+/*    0.1 */       alloc interpolators
+/*    1.0 */       exec
+/*    5   */          max o0, r0, r0
+/*    1.1 */       alloc position
+/*    2.0 */       exec
+/*    6   */          max oPos, r1, r1
+/*    2.1 */       exece
+/*    7   */          max r0._, c0, c0
+
+
+[2026-03-21 22:29:20.739] [info] [gpu] [t1371368] Generated pixel shader (36b) - hash 2E372EA28CC404B7:
+/*    0.0 */       alloc colors
+/*    0.1 */       exece
+/*    1   */          max oC0, r0, r0
+
+
+[2026-03-21 22:29:20.739] [info] [gpu] [t1371368] Creating graphics pipeline with VS 0A6D1DD7767FDF27, PS 2E372EA28CC404B7
+[2026-03-21 22:29:20.745] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.754] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.754] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.756] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.758] [info] [fs] [t1398132] VFS: 'd:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.758] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.776] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.776] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.777] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.778] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.780] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.780] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.784] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.784] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.787] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.788] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.790] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.791] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.793] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.793] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.794] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.794] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.795] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.795] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.796] [info] [fs] [t1398132] VFS: 'D:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.798] [info] [fs] [t1398132] VFS: 'D:\' -> '\Device\Harddisk0\Partition1' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1'
+[2026-03-21 22:29:20.798] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.798] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.799] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.799] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.800] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.800] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.800] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.801] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.801] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.801] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.802] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.802] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.803] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.803] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.804] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.804] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.804] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.804] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.805] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.805] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.805] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.806] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.806] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.806] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.807] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.807] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.807] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.808] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.808] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.808] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.809] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.809] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.809] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.809] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.810] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.810] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.810] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.811] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.811] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.811] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.811] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.812] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.812] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.812] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.815] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.815] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.816] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.816] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.816] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.817] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.817] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.818] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.818] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.818] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.818] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.819] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.820] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.820] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.821] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.822] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.822] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.822] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.823] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.823] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.823] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.824] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.824] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.824] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.825] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.825] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.825] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.825] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.826] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.826] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.826] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.826] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.827] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.827] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.827] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.828] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.828] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.828] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.831] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.831] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.832] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.832] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.833] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.833] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.834] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.835] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.835] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.835] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.836] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.836] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.836] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.837] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.837] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.837] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.837] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.838] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.838] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.838] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.839] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.839] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.839] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.840] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.840] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.840] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.840] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.841] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.841] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.841] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.841] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.842] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.842] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.842] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.842] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.843] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.843] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.843] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.844] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.844] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.847] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.847] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.848] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.848] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.848] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.848] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.849] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.849] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.849] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.849] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.850] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.850] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.850] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.850] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.851] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.851] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.851] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.851] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.852] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.852] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.852] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.852] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.853] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.853] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.853] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.853] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.854] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.854] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.854] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.854] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.855] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.855] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.855] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.855] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.856] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.856] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.856] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.857] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.857] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.857] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.857] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.858] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.858] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.858] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.859] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.859] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.859] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.860] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.860] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.860] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.862] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.862] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.863] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.863] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.863] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.864] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.864] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.864] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.865] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.866] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.867] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.867] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.867] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.868] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.868] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.868] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.869] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.869] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.869] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.869] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.870] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.870] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.870] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.871] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.871] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.871] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.871] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.872] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.872] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.872] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.872] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.873] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.873] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.873] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.874] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.874] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.874] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.874] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.875] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.875] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.875] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.875] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.876] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.876] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.876] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.879] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.880] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.880] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.880] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.881] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.881] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.881] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' -> host '\Device\Harddisk0\Partition1\packfiles'
+[2026-03-21 22:29:20.881] [info] [fs] [t1398132] VFS: 'd:\packfiles' -> '\Device\Harddisk0\Partition1\packfiles' -> device '\Device\Harddisk0\Partition1' ->

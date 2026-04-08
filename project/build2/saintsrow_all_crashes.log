@@ -1,0 +1,35 @@
+[AV#1] addr=0x8 RIP=0x7FF775885161 TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=488B4808488D
+[VEH-DECODE] fault=0x8 i=1 rex=0x48 opcode=0x8B bytes=488B4808
+[NULL-HANDLED] addr=0x8 RIP=0x7FF775885161 -- zeroed dest
+[NULL-OBJ] dest=rcx -> host 0x10F000000 (was reading [rax+0x8])
+[AV#2] addr=0x1A9632804 RIP=0x7FF774B778FE TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=43C704130002
+[DEMAND-PAGE] committed 64K at host 0x1A9632000 (guest 0xA9632804)
+[AV#4] addr=0x5 RIP=0x7FF7730412DE TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=0FB66805440F
+[VEH-DECODE] fault=0x5 i=0 rex=0x0 opcode=0x0F bytes=0FB66805
+[NULL-HANDLED] addr=0x5 RIP=0x7FF7730412DE -- zeroed dest
+[NULL-OBJ] dest=rbp -> host 0x10F000000 (was reading [rax+0x5])
+[AV#5] addr=0x4 RIP=0x7FF7730412E2 TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=440FB6600444
+[VEH-DECODE] fault=0x4 i=1 rex=0x44 opcode=0x0F bytes=440FB660
+[NULL-HANDLED] addr=0x4 RIP=0x7FF7730412E2 -- zeroed dest
+[NULL-OBJ] dest=r12 -> host 0x10F000000 (was reading [rax+0x4])
+[AV#6] addr=0x3 RIP=0x7FF7730412E7 TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=440FB6680344
+[VEH-DECODE] fault=0x3 i=1 rex=0x44 opcode=0x0F bytes=440FB668
+[NULL-HANDLED] addr=0x3 RIP=0x7FF7730412E7 -- zeroed dest
+[NULL-OBJ] dest=r13 -> host 0x10F000000 (was reading [rax+0x3])
+[AV#7] addr=0x2 RIP=0x7FF7730412EC TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=440FB678020F
+[VEH-DECODE] fault=0x2 i=1 rex=0x44 opcode=0x0F bytes=440FB678
+[NULL-HANDLED] addr=0x2 RIP=0x7FF7730412EC -- zeroed dest
+[NULL-OBJ] dest=r15 -> host 0x10F000000 (was reading [rax+0x2])
+[AV#8] addr=0x1 RIP=0x7FF7730412F1 TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=0FB678010FB6
+[VEH-DECODE] fault=0x1 i=0 rex=0x0 opcode=0x0F bytes=0FB67801
+[NULL-HANDLED] addr=0x1 RIP=0x7FF7730412F1 -- zeroed dest
+[NULL-OBJ] dest=rdi -> host 0x10F000000 (was reading [rax+0x1])
+[AV#9] addr=0x0 RIP=0x7FF7730412F5 TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=0FB600898424
+[VEH-DECODE] fault=0x0 i=0 rex=0x0 opcode=0x0F bytes=0FB60089
+[NULL-HANDLED] addr=0x0 RIP=0x7FF7730412F5 -- zeroed dest
+[NULL-OBJ] dest=rax -> host 0x10F000000 (was reading [rax+0x0])
+[AV#9] addr=0x0 RIP=0x0 TID=1411936 mod=unknown bytes=F000000F000000F000000F000000F000000F000000
+[AV#10] addr=0x0 RIP=0x7FF773041543 TID=1411936 mod=D:\recomp\360\saintsrow\project\build2\saintsrow.exe bytes=410FB6042489
+[VEH-DECODE] fault=0x0 i=1 rex=0x41 opcode=0x0F bytes=410FB604
+[NULL-HANDLED] addr=0x0 RIP=0x7FF773041543 -- zeroed dest
+[NULL-OBJ] dest=rax -> host 0x10F000000 (was reading [r12+0x0])

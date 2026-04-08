@@ -663,15 +663,23 @@ PPC_FUNC(sub_825D3580) {
     uint32_t ib_start = last_ib_end ? last_ib_end : rb_sec;
     uint32_t ib_end = r4 + 40; // after kick's 10 dwords
 
-    if (rb_prim && prim_write_pos < 8000) {
-        // Only create an indirect buffer for the KICK's own 10 dwords of PM4.
-        // These are known-valid: WAIT_FOR_IDLE + 2x EVENT_WRITE_SHD
-        // The rendering PM4 between kicks needs separate handling.
+    // Write to PHYSICAL memory, not virtual. The command processor reads from
+    // TranslatePhysical(primary_buffer_ptr_) which maps to a DIFFERENT host
+    // memory region than the virtual address. Writing to virtual rb_prim would
+    // be invisible to the command processor.
+    uint32_t rb_prim_phys = rb_prim ? ks->memory()->GetPhysicalAddress(rb_prim) : 0;
+    uint8_t* rb_prim_host = rb_prim_phys ? ks->memory()->TranslatePhysical(rb_prim_phys) : nullptr;
+
+    if (rb_prim_host && prim_write_pos < 8000) {
         uint32_t phys_kick = ks->memory()->GetPhysicalAddress(r4);
         if (phys_kick != UINT32_MAX) {
-            PPC_STORE_U32(rb_prim + prim_write_pos * 4, 0xC0013F00);
-            PPC_STORE_U32(rb_prim + (prim_write_pos + 1) * 4, phys_kick);
-            PPC_STORE_U32(rb_prim + (prim_write_pos + 2) * 4, 10);
+            // Write INDIRECT_BUFFER_PFD to PRIMARY ring buffer (physical memory)
+            auto write_rb = [&](uint32_t offset, uint32_t value) {
+                rex::memory::store_and_swap<uint32_t>(rb_prim_host + offset * 4, value);
+            };
+            write_rb(prim_write_pos, 0xC0013F00);
+            write_rb(prim_write_pos + 1, phys_kick);
+            write_rb(prim_write_pos + 2, 10);
             prim_write_pos += 3;
 
             // Also create an IB for rendering PM4 between last kick end and this kick.
@@ -717,9 +725,9 @@ PPC_FUNC(sub_825D3580) {
                     uint32_t pm4_dwords = scan_pos - pm4_start;
                     uint32_t phys_render = ks->memory()->GetPhysicalAddress(pm4_addr);
                     if (phys_render != UINT32_MAX && prim_write_pos < 7990) {
-                        PPC_STORE_U32(rb_prim + prim_write_pos * 4, 0xC0013F00);
-                        PPC_STORE_U32(rb_prim + (prim_write_pos + 1) * 4, phys_render);
-                        PPC_STORE_U32(rb_prim + (prim_write_pos + 2) * 4, pm4_dwords);
+                        write_rb(prim_write_pos, 0xC0013F00);
+                        write_rb(prim_write_pos + 1, phys_render);
+                        write_rb(prim_write_pos + 2, pm4_dwords);
                         prim_write_pos += 3;
 
                         static int render_ib_c = 0;
@@ -966,33 +974,57 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
             // Write a simple color gradient - each frame slightly different
             // Xbox 360 textures are tiled, so this won't look right geometrically,
             // but ANY non-black color proves the display pipeline works.
-            uint32_t color;
-            int phase = (frame_num / 30) % 6;
-            switch (phase) {
-                case 0: color = 0xFF0000FF; break; // Red
-                case 1: color = 0x00FF00FF; break; // Green
-                case 2: color = 0x0000FFFF; break; // Blue
-                case 3: color = 0xFFFF00FF; break; // Yellow
-                case 4: color = 0xFF00FFFF; break; // Magenta
-                case 5: color = 0x00FFFFFF; break; // Cyan
-            }
+            // Write pure white to the framebuffer. Any byte order should show as white.
+            uint32_t color = 0xFFFFFFFF;
             // Fill a portion of the framebuffer with the color
             // Framebuffer is 1280*720*4 = 3,686,400 bytes
             uint32_t* fb32 = (uint32_t*)fb_host;
-            for (uint32_t i = 0; i < 1280 * 720; i++) {
-                fb32[i] = color;
+            if (fb32) {
+                for (uint32_t i = 0; i < 1280 * 720; i++) {
+                    fb32[i] = color;
+                }
+                // Verify write and log
+                static int fb_log = 0;
+                if (++fb_log <= 3) {
+                    FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                    if (f) {
+                        fprintf(f, "[FB-Write #%d] host=%p phys=0x%08X color=0x%08X readback=0x%08X\n",
+                            fb_log, (void*)fb_host, fb_phys, color, fb32[0]);
+                        fclose(f);
+                    }
+                }
             }
             // Invalidate texture cache so GPU picks up our changes
             cp->InvalidateGpuMemory();
+        }
+
+        // Log fetch constants for debugging black screen
+        static int fetch_log = 0;
+        if (++fetch_log <= 3) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) {
+                fprintf(f, "[Fetch #%d] %08X %08X %08X %08X %08X %08X  fb=0x%08X %ux%u\n",
+                    fetch_log, fetch[0], fetch[1], fetch[2], fetch[3], fetch[4], fetch[5],
+                    fb_phys, width, height);
+                fclose(f);
+            }
         }
 
         // Write fetch constants and issue swap on command processor thread
         static int swap_call = 0;
         int this_call = ++swap_call;
         cp->CallInThread([cp, fb_phys, width, height, fetch, this_call]() {
+            // Invalidate texture cache on GPU thread to pick up our framebuffer writes
+            cp->InvalidateGpuMemory();
             // Write fetch constant 0 (registers 0x4800-0x4805)
             cp->RestoreRegisters(0x4800, fetch, 6, true);
             cp->IssueSwap(fb_phys, width, height);
+            static int swap_log = 0;
+            if (++swap_log <= 5) {
+                FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                if (f) { fprintf(f, "[GPU-Thread] IssueSwap #%d completed fb=0x%08X %ux%u\n",
+                    swap_log, fb_phys, width, height); fclose(f); }
+            }
         });
 
         static int kick_c = 0;

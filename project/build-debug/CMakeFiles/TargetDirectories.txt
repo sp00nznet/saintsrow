@@ -1,0 +1,4 @@
+D:/recomp/360/saintsrow/project/build-debug/CMakeFiles/saintsrow.dir
+D:/recomp/360/saintsrow/project/build-debug/CMakeFiles/saintsrow_codegen.dir
+D:/recomp/360/saintsrow/project/build-debug/CMakeFiles/edit_cache.dir
+D:/recomp/360/saintsrow/project/build-debug/CMakeFiles/rebuild_cache.dir
