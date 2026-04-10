@@ -476,24 +476,16 @@ PPC_FUNC(sub_8262FFE0) {
 
     __imp__sub_8262FFE0(ctx, base);
 
-    // Present framebuffer each frame during game loop
-    uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
-    if (game_state >= 3) {
-        static int swap_count = 0;
-        if (++swap_count % 2 == 0) {
-            auto* ks = REX_KERNEL_STATE();
-            auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
-            auto* cp = gs->command_processor();
-            uint32_t fb_phys = 0x09258000;
-            uint32_t fetch[6] = {
-                0x8A000002, 0x09258006, 0x0059E4FF,
-                0x00001414, 0x00000000, 0x00000200
-            };
-            cp->CallInThread([cp, fb_phys, fetch]() {
-                cp->InvalidateGpuMemory();
-                cp->RestoreRegisters(0x4800, fetch, 6, true);
-                cp->IssueSwap(fb_phys, 1280, 720);
-            });
+    // Trigger VdSwap via the game's own render path.
+    // Force the render-complete flag so the render wait thread calls VdSwap.
+    if (PPC_LOAD_U32(0x8370DD7C) >= 3 && _c % 5 == 0) {
+        uint32_t r31_val = 0x40001E00; // render context (from VdSwap-Fix logs)
+        if (r31_val) {
+            PPC_STORE_U32(r31_val + 19980, 0);    // skip flag = 0
+            uint8_t dirty = PPC_LOAD_U8(r31_val + 20424);
+            PPC_STORE_U8(r31_val + 20424, dirty | 0x8);
+            uint8_t dw = PPC_LOAD_U8(r31_val + 10809);
+            PPC_STORE_U8(r31_val + 10809, dw | 0x2);
         }
     }
 }
@@ -824,9 +816,6 @@ PPC_FUNC(sub_825D3580) {
 
             cp->UpdateWritePointer(prim_write_pos);
 
-            // The ring buffer + UpdateWritePointer should trigger the CP thread
-            // to process commands. Direct ExecutePacket was causing C++ exceptions
-            // from SDK assertions on the GPU thread.
 
             static int ib_c = 0;
             if (++ib_c <= 5) {
