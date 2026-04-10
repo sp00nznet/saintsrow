@@ -466,6 +466,14 @@ PPC_FUNC(sub_8262FFE0) {
     PPC_STORE_U8(0x8370E9DF, 0);
     PPC_STORE_U8(0x8370E9F6, 0);
 
+    // Check the render gate at [0x83710340] - if non-zero, sub_82633898 is skipped
+    uint32_t render_gate = PPC_LOAD_U32(0x83710340);
+    static int rg_log = 0;
+    if (++rg_log <= 5 || rg_log % 500 == 0) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[GL2_Render #%d] render_gate[0x83710340]=%u\n", _c, render_gate); fclose(f); }
+    }
+
     __imp__sub_8262FFE0(ctx, base);
 
     // Present framebuffer each frame during game loop
@@ -661,7 +669,15 @@ PPC_FUNC(sub_82716020) {
 extern "C" void __imp__sub_825D3580(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825D3580) {
     uint32_t r31 = ctx.r3.u32;
-    uint32_t r4 = ctx.r4.u32; // where the structure will be written
+    uint32_t r4 = ctx.r4.u32;
+    static int kick_total = 0;
+    kick_total++;
+    uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
+    if (kick_total <= 10 || (game_state >= 3 && kick_total <= 20) || kick_total % 500 == 0) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[Kick-Total #%d] state=%u r3=0x%08X r4=0x%08X\n",
+            kick_total, game_state, r31, r4); fclose(f); }
+    }
 
     __imp__sub_825D3580(ctx, base);
 
@@ -691,7 +707,12 @@ PPC_FUNC(sub_825D3580) {
     uint32_t rb_prim_phys = rb_prim ? ks->memory()->GetPhysicalAddress(rb_prim) : 0;
     uint8_t* rb_prim_host = rb_prim_phys ? ks->memory()->TranslatePhysical(rb_prim_phys) : nullptr;
 
-    if (rb_prim_host && prim_write_pos < 8000) {
+    // Ring buffer is circular - 8192 dwords. Wrap write position.
+    // Reserve positions 0-30 for ME_INIT, use 31-8191 for IBs.
+    if (prim_write_pos >= 8180) {
+        prim_write_pos = 31; // wrap around
+    }
+    if (rb_prim_host) {
         uint32_t phys_kick = ks->memory()->GetPhysicalAddress(r4);
         if (phys_kick != UINT32_MAX) {
             // Write INDIRECT_BUFFER_PFD to PRIMARY ring buffer (physical memory)
