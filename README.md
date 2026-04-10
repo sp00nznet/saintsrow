@@ -1,6 +1,8 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: Streaming IO Chain Working, Game Loop Active**
+**Status: 3D Rendering Active -- Cathedral and Loading Screen Visible**
+
+![Saints Row Logo Screen](logo.png)
 
 Static recompilation of Saints Row for Xbox 360 to native x86-64 PC executable using [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk).
 
@@ -66,35 +68,51 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Audio system (XMA decoder + SDL audio)
 - [x] Game creates 14+ worker threads (physics, streaming, etc.)
 - [x] Bink video decode -- both splash videos decode and audio plays
-- [x] Game state machine -- transitions through loading to GameLoop2
+- [x] Game state machine -- transitions through all loading phases (state 1 -> 2 -> 3)
+- [x] Content loading system -- all 151 items loaded (~30-60 seconds)
 - [x] VdSwap/IssueSwap -- frames present to D3D12 swap chain
-- [x] GPU ring buffer pipeline -- PM4 indirect buffers, 0 GPU errors
-- [x] Shader compilation -- vertex + pixel shaders generated
-- [x] Render targets created (1280x720 color + depth)
-- [x] Texture loading and resolve operations working
-- [x] Streaming IO chain -- IO completion callbacks fire, data loaded from packfiles
-- [x] GL2_Render running stably (600+ frames, 0 crashes)
-- [x] GameLoop2 with GL2_Init, GL2_World, GL2_Spawn, GL2_Physics all executing
-- [x] Content loading system partially working (IO read + registration)
-- [ ] Worker ring buffer population (loaded data reaching render workers)
-- [ ] Draw calls / visible game content on screen
+- [x] GPU ring buffer pipeline -- PM4 indirect buffers with circular wrap
+- [x] GPU command processor -- processes 4500+ kicks, executes draw calls
+- [x] Shader compilation -- 9 shaders, 5 graphics pipelines (including 3D game rendering)
+- [x] Render targets created (1280x2048 color + depth at EDRAM base 0/720)
+- [x] D3D12 presenter connected to window
+- [x] **3D game content visible** -- Saints Row logo, cathedral, loading screen rendered
+- [x] Game loop stable at 1700+ frames
+- [ ] Fix presentation flicker (VdSwap timing)
+- [ ] Fix color channel swizzle on 3D scene
+- [ ] Input system (controller navigation)
 - [ ] Menu navigation
 - [ ] In-game rendering
 - [ ] Gameplay
 
 ### Current Architecture
 
-The game loop runs: GL2_Init → GL2_Render → GL2_Physics → GL2_World → GL2_Spawn. The streaming IO chain processes packfile data (shaders, meshes, textures) through: StreamCallback → IOComp → ResLookup → BufAlloc → IORead → IOWork. The first IO initialization creates 8 worker threads. Subsequent IO operations bypass thread re-creation via ExCreateThread handle reuse.
+The game boots through Bink video playback (THQ/Volition logos), then loads 151 content items via a streaming IO pipeline: StreamCallback -> IOComp -> ResLookup -> BufAlloc -> IORead -> IOWork. Loading uses KeInitializeSemaphore preservation to maintain IO thread synchronization across re-initialization cycles, with multi-pump StreamCallback (8x per GameUpdate) for parallel IO dispatch.
+
+After loading, PostLoop5 runs the main game loop calling GL2_Render at ~30fps. The GPU command processor receives PM4 commands via the primary ring buffer (physical memory writes with circular wrap-around), follows INDIRECT_BUFFER_PFD references to secondary buffers containing draw calls, and compiles 5 graphics pipelines including 3 game-specific 3D rendering shader pairs with lighting and texture sampling.
+
+### Key Technical Fixes
+
+- **KeInitializeSemaphore override**: Preserves native semaphore objects when game reinitializes IO semaphores, preventing orphaned IO threads
+- **Audio deadlock fix**: Skip XAudioRegisterRenderDriverClient on re-init (sub_82600A68 acquires global_critical_region_ held by audio callback)
+- **Ring buffer physical memory**: Write INDIRECT_BUFFER_PFD to physical memory (not virtual) so command processor can read them
+- **Ring buffer wrap-around**: Circular write position prevents game loop kicks from being silently dropped
+- **Null page threshold**: Guest addresses < 256MB treated as null dereferences to prevent demand-page exhaustion
+- **VEH ultra-fast path**: Handles bad vtable dispatches at fault_addr=0x8000001E without overhead
 
 ### Known Issues
 
-- Loading queue processes 3/151 items before bypass (IO completion registration not fully connected to workers)
-- Second Bink video (sr_nite_01.bik) blocked due to garbage allocation crash
-- XamInput functions stubbed (SDK input_system() returns null)
+- Presentation flicker (gray frames between valid presents, VdSwap timing)
+- Color channel shift on 3D scene (logo colors correct, cathedral colors wrong)
+- Second+ Bink videos blocked (garbage allocation crash)
+- XamInput functions stubbed (input not connected)
+- Physics/world systems stubbed (sub_8234C1C0, sub_82604C10)
 
 ## Related Projects
 
-- [OpenRow2](https://github.com/KairiFey/OpenRow2) -- Decompilation of the Saints Row 2 PC port (different target, but useful for understanding game internals)
+- [StilwaterReclaimed](https://github.com/THE-W0RLD/StilwaterReclaimed) -- Saints Row 2 static recompilation (early stage)
+- [Halo 3 Recomp](https://github.com/twist84/halo3_cache_debug_recomp) -- Halo 3 cache debug recomp using ReXGlue SDK
+- [OpenRow2](https://github.com/KairiFey/OpenRow2) -- Decompilation of the Saints Row 2 PC port
 - [Xenia](https://github.com/xenia-project/xenia) -- Xbox 360 emulator with Saints Row compatibility info
 
 ## Prerequisites
