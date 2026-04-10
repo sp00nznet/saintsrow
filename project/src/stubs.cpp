@@ -476,17 +476,32 @@ PPC_FUNC(sub_8262FFE0) {
 
     __imp__sub_8262FFE0(ctx, base);
 
-    // Trigger VdSwap via the game's own render path.
-    // Force the render-complete flag so the render wait thread calls VdSwap.
-    if (PPC_LOAD_U32(0x8370DD7C) >= 3 && _c % 5 == 0) {
-        uint32_t r31_val = 0x40001E00; // render context (from VdSwap-Fix logs)
-        if (r31_val) {
-            PPC_STORE_U32(r31_val + 19980, 0);    // skip flag = 0
-            uint8_t dirty = PPC_LOAD_U8(r31_val + 20424);
-            PPC_STORE_U8(r31_val + 20424, dirty | 0x8);
-            uint8_t dw = PPC_LOAD_U8(r31_val + 10809);
-            PPC_STORE_U8(r31_val + 10809, dw | 0x2);
-        }
+    // Force render-complete flags every frame so VdSwap fires
+    {
+        uint32_t r31_val = 0x40001E00;
+        PPC_STORE_U32(r31_val + 19980, 0);
+        PPC_STORE_U8(r31_val + 20424, PPC_LOAD_U8(r31_val + 20424) | 0x8);
+        PPC_STORE_U8(r31_val + 10809, PPC_LOAD_U8(r31_val + 10809) | 0x2);
+        if (PPC_LOAD_U32(r31_val + 20080) == 0)
+            PPC_STORE_U32(r31_val + 20080, 1);
+    }
+
+    // Supplemental present every 30th frame using actual GPU fetch constants
+    if (PPC_LOAD_U32(0x8370DD7C) >= 3 && _c % 30 == 0) {
+        auto* ks2 = REX_KERNEL_STATE();
+        auto* gs2 = static_cast<rex::graphics::GraphicsSystem*>(ks2->emulator()->graphics_system());
+        auto* cp2 = gs2->command_processor();
+        auto& regs = *cp2->register_file();
+        auto fa = regs.GetTextureFetch(0);
+        uint32_t ft[6] = {fa.dword_0, fa.dword_1, fa.dword_2,
+                          fa.dword_3, fa.dword_4, fa.dword_5};
+        uint32_t fb = (ft[1] >> 12) << 12;
+        if (fb == 0) fb = 0x09258000;
+        cp2->CallInThread([cp2, fb, ft]() {
+            cp2->InvalidateGpuMemory();
+            cp2->RestoreRegisters(0x4800, ft, 6, true);
+            cp2->IssueSwap(fb, 1280, 720);
+        });
     }
 }
 TRACE_STATE("RenderD", 82636688)
