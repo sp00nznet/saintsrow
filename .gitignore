@@ -38,3 +38,4 @@ thirdparty/
 
 # Claude
 .claude/
+project/build4/
