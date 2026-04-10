@@ -467,6 +467,30 @@ PPC_FUNC(sub_8262FFE0) {
     PPC_STORE_U8(0x8370E9F6, 0);
 
     __imp__sub_8262FFE0(ctx, base);
+
+    // Force IssueSwap every frame during the game loop.
+    // The game's render wait thread doesn't trigger VdSwap after boot because
+    // the render complete flag isn't set (no world geometry to render).
+    // Present whatever is in the framebuffer so the user sees output.
+    uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
+    if (game_state >= 3) {
+        static int swap_count = 0;
+        swap_count++;
+        // Only swap every few frames to avoid overwhelming the GPU thread
+        if (swap_count % 3 == 0) {
+            auto* ks = REX_KERNEL_STATE();
+            auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
+            auto* cp = gs->command_processor();
+            // Use the same framebuffer and fetch constants as VdSwap
+            uint32_t fb_phys = 0x09258000;
+            uint32_t width = 1280, height = 720;
+            // Read fetch constants from the last VdSwap packet (stored in GPU regs)
+            cp->CallInThread([cp, fb_phys, width, height]() {
+                cp->InvalidateGpuMemory();
+                cp->IssueSwap(fb_phys, width, height);
+            });
+        }
+    }
 }
 TRACE_STATE("RenderD", 82636688)
 #undef TRACE_STATE
