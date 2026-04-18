@@ -486,22 +486,25 @@ PPC_FUNC(sub_8262FFE0) {
             PPC_STORE_U32(r31_val + 20080, 1);
     }
 
-    // Supplemental present every 30th frame using actual GPU fetch constants
-    if (PPC_LOAD_U32(0x8370DD7C) >= 3 && _c % 30 == 0) {
-        auto* ks2 = REX_KERNEL_STATE();
-        auto* gs2 = static_cast<rex::graphics::GraphicsSystem*>(ks2->emulator()->graphics_system());
-        auto* cp2 = gs2->command_processor();
-        auto& regs = *cp2->register_file();
-        auto fa = regs.GetTextureFetch(0);
-        uint32_t ft[6] = {fa.dword_0, fa.dword_1, fa.dword_2,
-                          fa.dword_3, fa.dword_4, fa.dword_5};
-        uint32_t fb = (ft[1] >> 12) << 12;
-        if (fb == 0) fb = 0x09258000;
-        cp2->CallInThread([cp2, fb, ft]() {
-            cp2->InvalidateGpuMemory();
-            cp2->RestoreRegisters(0x4800, ft, 6, true);
-            cp2->IssueSwap(fb, 1280, 720);
-        });
+    // Present every frame to keep the swap chain always filled with content.
+    // Use an atomic flag to skip if the previous swap hasn't completed yet,
+    // preventing CallInThread queue buildup.
+    if (PPC_LOAD_U32(0x8370DD7C) >= 3) {
+        static std::atomic<bool> swap_pending{false};
+        if (!swap_pending.exchange(true)) {
+            auto* ks2 = REX_KERNEL_STATE();
+            auto* gs2 = static_cast<rex::graphics::GraphicsSystem*>(ks2->emulator()->graphics_system());
+            auto* cp2 = gs2->command_processor();
+            uint32_t ft[6] = {0x8A000002, 0x09258006, 0x0059E4FF,
+                              0x00001414, 0x00000000, 0x00000200};
+            uint32_t fb = 0x09258000;
+            cp2->CallInThread([cp2, fb, ft]() {
+                cp2->InvalidateGpuMemory();
+                cp2->RestoreRegisters(0x4800, ft, 6, true);
+                cp2->IssueSwap(fb, 1280, 720);
+                swap_pending.store(false);
+            });
+        }
     }
 }
 TRACE_STATE("RenderD", 82636688)
@@ -746,8 +749,7 @@ PPC_FUNC(sub_825D3580) {
             write_rb(prim_write_pos + 2, 10);
             prim_write_pos += 3;
 
-            // Also create an IB for rendering PM4 between last kick end and this kick.
-            // Scan the data to find valid PM4 extent.
+            // Create render IB for PM4 between last kick and this kick.
             if (last_ib_end > 0 && last_ib_end < r4) {
                 uint32_t scan_start = last_ib_end;
                 uint32_t scan_pos = 0;
@@ -1038,27 +1040,12 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
             }
         }
 
-        // Write fetch constants and issue swap on command processor thread
-        static int swap_call = 0;
-        int this_call = ++swap_call;
-        cp->CallInThread([cp, fb_phys, width, height, fetch, this_call]() {
-            // Invalidate texture cache on GPU thread to pick up our framebuffer writes
-            cp->InvalidateGpuMemory();
-            // Write fetch constant 0 (registers 0x4800-0x4805)
-            cp->RestoreRegisters(0x4800, fetch, 6, true);
-            cp->IssueSwap(fb_phys, width, height);
-            static int swap_log = 0;
-            if (++swap_log <= 5) {
-                FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                if (f) { fprintf(f, "[GPU-Thread] IssueSwap #%d completed fb=0x%08X %ux%u\n",
-                    swap_log, fb_phys, width, height); fclose(f); }
-            }
-        });
-
+        // No IssueSwap here - GL2_Render handles frequent presentation.
+        // VdSwap fires too infrequently to be the sole presenter.
         static int kick_c = 0;
         if (++kick_c <= 10) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
-            if (f) { fprintf(f, "[VdSwap-Kick #%d] IssueSwap fb=0x%08X %ux%u\n",
+            if (f) { fprintf(f, "[VdSwap #%d] fb=0x%08X %ux%u (GL2_Render presents)\n",
                 kick_c, fb_phys, width, height); fclose(f); }
         }
     }
