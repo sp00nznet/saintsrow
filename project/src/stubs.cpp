@@ -486,16 +486,18 @@ PPC_FUNC(sub_8262FFE0) {
             PPC_STORE_U32(r31_val + 20080, 1);
     }
 
-    // Present every frame to keep the swap chain always filled with content.
-    // Use an atomic flag to skip if the previous swap hasn't completed yet,
-    // preventing CallInThread queue buildup.
+    // Present every frame with atomic guard.
+    // Restore fetch constants before IssueSwap for correct format interpretation.
     if (PPC_LOAD_U32(0x8370DD7C) >= 3) {
         static std::atomic<bool> swap_pending{false};
         if (!swap_pending.exchange(true)) {
             auto* ks2 = REX_KERNEL_STATE();
             auto* gs2 = static_cast<rex::graphics::GraphicsSystem*>(ks2->emulator()->graphics_system());
             auto* cp2 = gs2->command_processor();
-            uint32_t ft[6] = {0x8A000002, 0x09258006, 0x0059E4FF,
+            // Clear tiled bit (bit 31 of dword_0) - the D3D12 framebuffer
+            // is linear, not Xenos-tiled. With tiled=1, the texture cache
+            // applies detiling to linear data, causing crosshatch artifacts.
+            uint32_t ft[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
                               0x00001414, 0x00000000, 0x00000200};
             uint32_t fb = 0x09258000;
             cp2->CallInThread([cp2, fb, ft]() {
@@ -504,6 +506,35 @@ PPC_FUNC(sub_8262FFE0) {
                 cp2->IssueSwap(fb, 1280, 720);
                 swap_pending.store(false);
             });
+        }
+
+        // Sample framebuffer pixels for color diagnosis
+        static int px_log = 0;
+        if (++px_log <= 5 || px_log == 50 || px_log == 200) {
+            auto* ks3 = REX_KERNEL_STATE();
+            uint32_t fb_phys = 0x09258000;
+            uint8_t* fb_host = ks3->memory()->TranslatePhysical(fb_phys);
+            if (fb_host) {
+                FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                if (f) {
+                    // Sample pixels at center (360*1280*4 + 640*4) and corners
+                    uint32_t center = 360 * 1280 * 4 + 640 * 4;
+                    uint32_t tl = 100 * 1280 * 4 + 100 * 4;
+                    uint32_t tr = 100 * 1280 * 4 + 1100 * 4;
+                    fprintf(f, "[Pixels #%d] center=[%02X %02X %02X %02X] tl=[%02X %02X %02X %02X] tr=[%02X %02X %02X %02X]\n",
+                        px_log,
+                        fb_host[center], fb_host[center+1], fb_host[center+2], fb_host[center+3],
+                        fb_host[tl], fb_host[tl+1], fb_host[tl+2], fb_host[tl+3],
+                        fb_host[tr], fb_host[tr+1], fb_host[tr+2], fb_host[tr+3]);
+                    // Also dump first 16 bytes of framebuffer (first 4 pixels)
+                    fprintf(f, "[FB Raw] %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X\n",
+                        fb_host[0], fb_host[1], fb_host[2], fb_host[3],
+                        fb_host[4], fb_host[5], fb_host[6], fb_host[7],
+                        fb_host[8], fb_host[9], fb_host[10], fb_host[11],
+                        fb_host[12], fb_host[13], fb_host[14], fb_host[15]);
+                    fclose(f);
+                }
+            }
         }
     }
 }
@@ -765,9 +796,10 @@ PPC_FUNC(sub_825D3580) {
                 while (scan_pos < scan_len) {
                     uint32_t hdr = PPC_LOAD_U32(scan_start + scan_pos * 4);
                     if (hdr == 0) {
-                        // Skip zero padding (possible alignment)
-                        scan_pos++;
-                        continue;
+                        // Stop at zero - the CP can't skip zeros and would
+                        // misinterpret them as Type0 packets, causing
+                        // misalignment and packet overflow errors.
+                        break;
                     }
                     uint32_t pkt_type = (hdr >> 30) & 3;
                     uint32_t count;
@@ -791,36 +823,59 @@ PPC_FUNC(sub_825D3580) {
                     uint32_t pm4_dwords = scan_pos - pm4_start;
                     uint32_t phys_render = ks->memory()->GetPhysicalAddress(pm4_addr);
                     if (phys_render != UINT32_MAX && prim_write_pos < 7990) {
+                        // Copy PM4 data from virtual to physical memory.
+                        // The game writes PM4 to virtual memory but the CP reads
+                        // from physical, which is a DIFFERENT host memory region.
+                        uint8_t* render_virt = ks->memory()->TranslateVirtual(pm4_addr);
+                        uint8_t* render_phys = ks->memory()->TranslatePhysical(phys_render);
+                        if (render_virt && render_phys) {
+                            memcpy(render_phys, render_virt, pm4_dwords * 4);
+                        }
+
                         write_rb(prim_write_pos, 0xC0013F00);
                         write_rb(prim_write_pos + 1, phys_render);
                         write_rb(prim_write_pos + 2, pm4_dwords);
                         prim_write_pos += 3;
 
                         static int render_ib_c = 0;
-                        if (++render_ib_c <= 3) {
+                        render_ib_c++;
+                        if (render_ib_c <= 5 || render_ib_c == 20 || render_ib_c == 100) {
                             FILE* rf = fopen("saintsrow_heartbeat.log", "a");
                             if (rf) {
                                 fprintf(rf, "[Render-IB #%d] phys=0x%08X dwords=%u (skipped %u zeros)\n",
                                     render_ib_c, phys_render, pm4_dwords, pm4_start);
-                                // Decode first few PM4 opcodes
+                                // Scan ALL packets looking for key registers
                                 uint32_t dp = 0;
-                                for (int pkt = 0; pkt < 10 && dp < pm4_dwords; pkt++) {
+                                int pkt_logged = 0;
+                                while (dp < pm4_dwords) {
                                     uint32_t h = PPC_LOAD_U32(pm4_addr + dp * 4);
+                                    if (h == 0) { dp++; continue; }
                                     uint32_t pt = (h >> 30) & 3;
-                                    if (pt == 3) {
-                                        uint32_t op = (h >> 8) & 0xFF;
-                                        uint32_t cnt = ((h >> 16) & 0x3FFF) + 1;
-                                        fprintf(rf, "  [%u] Type3 op=0x%02X cnt=%u\n", dp, op, cnt);
-                                        dp += 1 + cnt;
-                                    } else if (pt == 0) {
+                                    if (pt == 0) {
                                         uint32_t reg = h & 0x7FFF;
                                         uint32_t cnt = ((h >> 16) & 0x3FFF) + 1;
-                                        fprintf(rf, "  [%u] Type0 reg=0x%04X cnt=%u\n", dp, reg, cnt);
+                                        // Log key registers: RB_COLOR_INFO=0x2001,
+                                        // RB_SURFACE_INFO=0x2000, RB_COLOR_MASK=0x2023
+                                        // Fetch constants start at 0x4800
+                                        bool interesting = (reg >= 0x2000 && reg <= 0x2010)
+                                            || (reg >= 0x4800 && reg <= 0x4806)
+                                            || pkt_logged < 5;
+                                        if (interesting) {
+                                            fprintf(rf, "  [%u] Type0 reg=0x%04X cnt=%u", dp, reg, cnt);
+                                            for (uint32_t j = 0; j < cnt && j < 8; j++)
+                                                fprintf(rf, " %08X", PPC_LOAD_U32(pm4_addr + (dp+1+j)*4));
+                                            fprintf(rf, "\n");
+                                            pkt_logged++;
+                                        }
                                         dp += 1 + cnt;
-                                    } else if (h == 0) {
-                                        dp++; // skip zero
+                                    } else if (pt == 3) {
+                                        uint32_t op = (h >> 8) & 0xFF;
+                                        uint32_t cnt = ((h >> 16) & 0x3FFF) + 1;
+                                        if (pkt_logged < 5 || op == 0x46 /*EVENT_WRITE*/)
+                                            fprintf(rf, "  [%u] Type3 op=0x%02X cnt=%u\n", dp, op, cnt);
+                                        pkt_logged++;
+                                        dp += 1 + cnt;
                                     } else {
-                                        fprintf(rf, "  [%u] Type%u hdr=0x%08X\n", dp, pt, h);
                                         dp++;
                                     }
                                 }
@@ -1028,16 +1083,23 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
 
         // Test pattern removed - let the GPU's actual rendering show through.
 
-        // Log fetch constants for debugging black screen
+        // Log ALL fetch constants to detect format changes over time
         static int fetch_log = 0;
-        if (++fetch_log <= 3) {
+        static uint32_t prev_fetch[6] = {};
+        bool changed = (fetch_log == 0);
+        for (int i = 0; i < 6 && !changed; i++)
+            if (fetch[i] != prev_fetch[i]) changed = true;
+        fetch_log++;
+        if (changed || fetch_log <= 10 || fetch_log % 50 == 0) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
             if (f) {
-                fprintf(f, "[Fetch #%d] %08X %08X %08X %08X %08X %08X  fb=0x%08X %ux%u\n",
-                    fetch_log, fetch[0], fetch[1], fetch[2], fetch[3], fetch[4], fetch[5],
+                fprintf(f, "[Fetch #%d%s] %08X %08X %08X %08X %08X %08X  fb=0x%08X %ux%u\n",
+                    fetch_log, changed ? " CHANGED" : "",
+                    fetch[0], fetch[1], fetch[2], fetch[3], fetch[4], fetch[5],
                     fb_phys, width, height);
                 fclose(f);
             }
+            for (int i = 0; i < 6; i++) prev_fetch[i] = fetch[i];
         }
 
         // No IssueSwap here - GL2_Render handles frequent presentation.

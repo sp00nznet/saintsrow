@@ -812,7 +812,7 @@ public:
             game_dir = exe_dir / ".." / "extracted";
         }
 
-        std::string log_file_cvar = REXCVAR_GET(log_file);
+        std::string log_file_cvar = "saintsrow_sdk.log";
         std::string log_level_str = REXCVAR_GET(log_level);
         if (REXCVAR_GET(log_verbose) && log_level_str == "info") {
             log_level_str = "trace";
