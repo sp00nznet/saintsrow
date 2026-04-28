@@ -497,6 +497,7 @@ PPC_FUNC(sub_8262FFE0) {
             // Clear tiled bit (bit 31 of dword_0) - the D3D12 framebuffer
             // is linear, not Xenos-tiled. With tiled=1, the texture cache
             // applies detiling to linear data, causing crosshatch artifacts.
+            // Linear (untiled) with ZYX1 swizzle for correct channel order
             uint32_t ft[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
                               0x00001414, 0x00000000, 0x00000200};
             uint32_t fb = 0x09258000;
@@ -750,8 +751,16 @@ PPC_FUNC(sub_825D3580) {
 
     // Ring buffer is circular - 8192 dwords. Wrap write position.
     // Reserve positions 0-30 for ME_INIT, use 31-8191 for IBs.
+    // On wrap, zero out the area ahead to prevent the CP from
+    // interpreting stale data as PM4 packets (causes overflow errors).
     if (prim_write_pos >= 8180) {
-        prim_write_pos = 31; // wrap around
+        prim_write_pos = 31;
+        if (rb_prim_host) {
+            // Zero entire usable ring buffer (positions 31-8191) to prevent
+            // the CP from hitting stale loading-phase data with huge packet
+            // counts that cause overflow errors.
+            memset(rb_prim_host + 31 * 4, 0, (8192 - 31) * 4);
+        }
     }
     if (rb_prim_host) {
         uint32_t phys_kick = ks->memory()->GetPhysicalAddress(r4);
@@ -957,6 +966,19 @@ PPC_FUNC(sub_825D3DA8) {
         if (rb_phys != UINT32_MAX) {
             // Primary ring buffer at 0xE98B7000, size 0x8000 (32KB)
             int size_log2 = 12;
+
+            // Copy ME_INIT header from virtual to physical, then zero
+            // the rest. Physical memory starts uninitialized and any
+            // stale data will be misinterpreted as PM4 packets by the CP.
+            uint8_t* rb_virt_host = ks->memory()->TranslateVirtual(rb_13436);
+            uint8_t* rb_phys_host = ks->memory()->TranslatePhysical(rb_phys);
+            if (rb_virt_host && rb_phys_host) {
+                // Copy ME_INIT (first 31 dwords = 124 bytes)
+                memcpy(rb_phys_host, rb_virt_host, 31 * 4);
+                // Zero the rest to prevent stale data overflow errors
+                memset(rb_phys_host + 31 * 4, 0, 32768 - 31 * 4);
+            }
+
             cp->InitializeRingBuffer(rb_phys, size_log2);
 
             // Enable read pointer writeback
