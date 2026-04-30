@@ -1,8 +1,9 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: 3D Rendering Active -- Cathedral and Loading Screen Visible**
+**Status: 3D Rendering Active -- Cathedral Scene with Correct Sky Rendering**
 
 ![Saints Row Logo Screen](logo.png)
+![Cathedral Loading Screen](newscreen2.png)
 
 Static recompilation of Saints Row for Xbox 360 to native x86-64 PC executable using [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk).
 
@@ -77,11 +78,15 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Render targets created (1280x2048 color + depth at EDRAM base 0/720)
 - [x] D3D12 presenter connected to window
 - [x] **3D game content visible** -- Saints Row logo, cathedral, loading screen rendered
-- [x] Game loop stable at 1700+ frames
-- [ ] Fix presentation flicker (VdSwap timing)
-- [ ] Fix color channel swizzle on 3D scene
-- [ ] Input system (controller navigation)
-- [ ] Menu navigation
+- [x] Game loop stable at 6500+ frames
+- [x] Fix presentation flicker -- atomic swap guard, every-frame IssueSwap from GL2_Render
+- [x] Fix tiling artifacts -- linear fetch constants for D3D12 framebuffer (sky now renders correctly)
+- [x] Fix PM4 packet overflow -- virtual→physical memcpy for render IBs, zero-gap scanner fix
+- [x] Fix ring buffer overflow -- zero physical memory on init and wrap-around
+- [x] Streaming IO pump in all game states (world loading continues in state 3)
+- [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
+- [ ] Advance past cathedral loading screen (world loading completion)
+- [ ] Input system (controller navigation past menus)
 - [ ] In-game rendering
 - [ ] Gameplay
 
@@ -97,16 +102,21 @@ After loading, PostLoop5 runs the main game loop calling GL2_Render at ~30fps. T
 - **Audio deadlock fix**: Skip XAudioRegisterRenderDriverClient on re-init (sub_82600A68 acquires global_critical_region_ held by audio callback)
 - **Ring buffer physical memory**: Write INDIRECT_BUFFER_PFD to physical memory (not virtual) so command processor can read them
 - **Ring buffer wrap-around**: Circular write position prevents game loop kicks from being silently dropped
+- **Virtual→physical memcpy**: Game writes PM4 to virtual memory but CP reads physical -- copy render IB data before creating indirect buffer references
+- **PM4 zero-gap scanner**: Stop at first zero instead of skipping -- CP interprets zeros as Type0 packets causing misalignment and overflow errors
+- **Linear fetch constants**: D3D12 framebuffer is linear, not Xenos-tiled -- clearing tiled bit fixes crosshatch artifacts and sky color
+- **Atomic swap guard**: Prevent CallInThread queue buildup with atomic swap_pending flag -- eliminates presentation flashing
+- **Ring buffer zero-fill**: Zero physical memory on init and wrap to prevent stale loading-phase PM4 data from causing overflow errors
 - **Null page threshold**: Guest addresses < 256MB treated as null dereferences to prevent demand-page exhaustion
 - **VEH ultra-fast path**: Handles bad vtable dispatches at fault_addr=0x8000001E without overhead
 
 ### Known Issues
 
-- Presentation flicker (gray frames between valid presents, VdSwap timing)
-- Color channel shift on 3D scene (logo colors correct, cathedral colors wrong)
+- Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
+- Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)
+- Cathedral loading screen doesn't advance to gameplay (world loading not completing)
 - Second+ Bink videos blocked (garbage allocation crash)
-- XamInput functions stubbed (input not connected)
-- Physics/world systems stubbed (sub_8234C1C0, sub_82604C10)
+- Physics/world systems not initialized (function pointer at 0x8370F248 stays null)
 
 ## Related Projects
 
