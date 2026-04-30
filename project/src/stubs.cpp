@@ -345,10 +345,11 @@ PPC_FUNC(sub_822827B0) {
     // NOTE: Do NOT clear [0x837102B4] - it's the IO context pointer read by
     // IO threads at [0x83710000+692]. Clearing it causes threads to exit,
     // killing loading progress.
-    if (state_after == 1) {
+    // Pump the streaming callback in ALL states, not just state 1.
+    // The game's world loading continues in state 3 and needs the
+    // streaming system to keep processing file reads.
+    {
         extern void sub_8265F720(PPCContext& ctx, uint8_t* base);
-        // Pump streaming callback multiple times per frame to dispatch
-        // IO requests in parallel rather than one-at-a-time.
         for (int pump = 0; pump < 8; pump++) {
             PPCContext sc_ctx = ctx;
             sc_ctx.r3.u64 = 0x827A1F24;
@@ -356,8 +357,12 @@ PPC_FUNC(sub_822827B0) {
             sc_ctx.r5.u64 = 0;
             sc_ctx.r6.u64 = 0;
             sub_8265F720(sc_ctx, base);
-            // Stop if callback returned null (no more pending requests)
             if (sc_ctx.r3.u32 == 0) break;
+        }
+        static int pump_log = 0;
+        if (state_after >= 3 && ++pump_log <= 5) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[StreamPump] Pumping in state %u\n", state_after); fclose(f); }
         }
     }
     // Loading now completes naturally via KeInitializeSemaphore preservation.
@@ -460,11 +465,16 @@ PPC_FUNC(sub_8262FFE0) {
             fclose(f);
         }
     }
-    // Clear flags that gate bad indirect calls in the game loop.
-    // Multiple bctrl instructions read function pointers that are null/invalid
-    // because physics/world systems are stubbed.
-    PPC_STORE_U8(0x8370E9DF, 0);
-    PPC_STORE_U8(0x8370E9F6, 0);
+    // Only clear flags that gate indirect calls if function pointer is invalid.
+    // When the pointer becomes valid, let the game call through to enable
+    // world loading/physics system updates.
+    {
+        uint32_t fn = PPC_LOAD_U32(0x8370F248);
+        if (fn < 0x82000000 || fn >= 0x83000000) {
+            PPC_STORE_U8(0x8370E9DF, 0);
+            PPC_STORE_U8(0x8370E9F6, 0);
+        }
+    }
 
     // Check the render gate at [0x83710340] - if non-zero, sub_82633898 is skipped
     uint32_t render_gate = PPC_LOAD_U32(0x83710340);
@@ -630,11 +640,22 @@ PPC_FUNC(sub_82185498) {
         if (f) { fprintf(f, "[PostLoop5] ENTER #%d r3=0x%08X r30=0x%08X\n", c, ctx.r3.u32, ctx.r30.u32); fclose(f); } }
 
 
-    // Clear the flag at 0x8370E9DF to prevent a bad indirect call at PPC 0x82186EE0.
-    // This bctrl reads [r31] as a function pointer, which is often null/invalid
-    // when game world systems (physics, etc.) aren't fully initialized.
-    // The flag guards: if [0x8370E9DF] != 1, skip the call. Force it to 0.
-    PPC_STORE_U8(0x8370E9DF, 0);
+    // The flags at 0x8370E9DF and 0x8370E9F6 gate a bctrl at PPC 0x82186EE0
+    // that calls through [0x8370F248]. Only clear the flags if the function
+    // pointer is null/invalid - let the call through if it points to valid code.
+    {
+        uint32_t fn_ptr = PPC_LOAD_U32(0x8370F248);
+        bool valid = (fn_ptr >= 0x82000000 && fn_ptr < 0x83000000);
+        static int flog = 0;
+        if (++flog <= 10 || flog % 500 == 0) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[FnGate #%d] [0x8370F248]=0x%08X flags=[%u,%u] valid=%d\n",
+                flog, fn_ptr, PPC_LOAD_U8(0x8370E9DF), PPC_LOAD_U8(0x8370E9F6), valid); fclose(f); }
+        }
+        if (!valid) {
+            PPC_STORE_U8(0x8370E9DF, 0);
+        }
+    }
 
     __imp__sub_82185498(ctx, base);
     if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
