@@ -368,6 +368,36 @@ static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
             repeat_count = 0;
         }
         null_call_count++;
+        // Map the host return address back to the guest caller function so we
+        // can identify WHICH guest call site is branching through a null ptr.
+        // (Reuses PPCFuncMappings: find the host func whose ptr is closest
+        //  below ret_addr.) Log each distinct guest caller once.
+        {
+            uint32_t caller_ppc = 0;
+            uint64_t caller_dist = UINT64_MAX;
+            for (int j = 0; PPCFuncMappings[j].guest != 0; j++) {
+                uint64_t fn = (uint64_t)PPCFuncMappings[j].host;
+                if (fn <= ret_addr && (ret_addr - fn) < caller_dist) {
+                    caller_dist = ret_addr - fn;
+                    caller_ppc = (uint32_t)PPCFuncMappings[j].guest;
+                }
+            }
+            static uint32_t seen_callers[64] = {0};
+            static int seen_n = 0;
+            bool is_new = (caller_dist < 0x100000);
+            for (int k = 0; k < seen_n && is_new; k++)
+                if (seen_callers[k] == caller_ppc) is_new = false;
+            if (is_new && seen_n < 64) {
+                seen_callers[seen_n++] = caller_ppc;
+                FILE* nf = fopen("saintsrow_all_crashes.log", "a");
+                if (nf) {
+                    fprintf(nf, "[NULL-CALL-SITE] guest caller PPC 0x%08X (+0x%llX) ret=0x%llX\n",
+                        caller_ppc, (unsigned long long)caller_dist,
+                        (unsigned long long)ret_addr);
+                    fclose(nf);
+                }
+            }
+        }
         if (null_call_count <= 20) {
             FILE* nf = fopen("saintsrow_all_crashes.log", "a");
             if (nf) {

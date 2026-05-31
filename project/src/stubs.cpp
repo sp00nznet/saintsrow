@@ -322,8 +322,14 @@ PPC_FUNC(sub_822827B0) {
         uint32_t load_queue = PPC_LOAD_U32(r31_addr - 196); // [r31-196] = loading queue ptr
         uint32_t internal_var = PPC_LOAD_U32(r31_addr + 0);  // [r31+0] another state var
         uint32_t r31_776 = PPC_LOAD_U32(r31_addr + 776);     // [r31+776]
-        // sub_82282638 checks 4 entries at base 0x840BAAE8, stride 584
-        uint32_t base = 0x840BAAE8;
+        // sub_82282638 checks 4 entries at base 0x832BAAE8, stride 584.
+        // (Verified in IDA against recomp: sub_82282638 computes
+        //  lis -31956; addi -21784 -> 0x832BAAE8, then reads slot+24/+108/+360
+        //  and ORs them; loading screen persists while any byte != 0.)
+        // NOTE: the old base 0x840BAAE8 was a typo (0x84 vs 0x83) with ZERO
+        // code xrefs - it read uninitialized .data, so prior [0,224,64]
+        // readings were garbage. Real slot array is 0x832BAAE8.
+        uint32_t base = 0x832BAAE8;
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
             uint32_t q8 = load_queue ? PPC_LOAD_U32(load_queue + 8) : 0;

@@ -84,8 +84,11 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Fix PM4 packet overflow -- virtual→physical memcpy for render IBs, zero-gap scanner fix
 - [x] Fix ring buffer overflow -- zero physical memory on init and wrap-around
 - [x] Streaming IO pump in all game states (world loading continues in state 3)
+- [x] Headless static-analysis pipeline (IDA Pro + Ghidra) byte-aligned to the recomp image
+- [x] Boot/splash sequence confirmed to complete naturally (state 1 -> 2 -> 3, 151-item queue drains)
+- [x] Root-caused the post-boot crash to a re-entrant IO-init null deref (see below)
+- [ ] Fix re-entrant IO-subsystem init crash loop (sub_8260CC50)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
-- [ ] Advance past cathedral loading screen (world loading completion)
 - [ ] Input system (controller navigation past menus)
 - [ ] In-game rendering
 - [ ] Gameplay
@@ -110,13 +113,21 @@ After loading, PostLoop5 runs the main game loop calling GL2_Render at ~30fps. T
 - **Null page threshold**: Guest addresses < 256MB treated as null dereferences to prevent demand-page exhaustion
 - **VEH ultra-fast path**: Handles bad vtable dispatches at fault_addr=0x8000001E without overhead
 
+### Latest Investigation (2026-05-31)
+
+A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image, cross-checked against the generated PPC) corrected two long-standing assumptions and pinpointed the real post-boot blocker:
+
+- **Static-analysis tooling fixed.** IDA had been loading the extracted PE with stale section `PointerToRawData` values, shifting all of `.text` by `0xE00` and producing garbage decompilation. Patching section headers so raw offset == RVA gives a byte-exact, fully-decompiling database (18,842 functions) that matches the recomp 1:1.
+- **`0x8370F248` is a red herring.** All seven writers set it to `nullsub_2` (a no-op stub) -- it is a hook slot that defaults to doing nothing, not a "physics/world init pointer." Whether it is null or `nullsub_2` is functionally identical.
+- **The boot/splash load is NOT stuck.** A loading-diagnostic hook had been reading the wrong address (`0x840BAAE8`, which has zero code references and holds uninitialized data) instead of the real loading-slot array at `0x832BAAE8`. With the correct address, the boot state machine (`sub_822827B0`) advances `1 -> 2 -> 3` on its own and the 151-item content queue drains -- the splash sequence completes.
+- **Real blocker: a re-entrant IO-init crash loop.** After boot, the game crash-loops on a deterministic null-object dereference (read at `obj+0x0`/`+0x8`) reached via `StreamCallback (sub_8265F720) -> IOComplete (sub_82604BE8) -> IOCtxCreate (sub_8260C318) -> IOInit (sub_8260CC50)`. `sub_8260CC50` initializes the IO semaphore (`0x832AD66C`), builds the IO queue list-heads, and spawns the IO worker threads (`sub_8260CBA0`). It is meant to run once but is re-entered every frame, re-initializing the semaphore and queues while the worker threads concurrently use them. The VEH masks each fault, but the corruption eventually turns fatal. Proposed fix: a true once-guard on `sub_8260CC50` so the IO subsystem initializes a single time.
+
 ### Known Issues
 
+- Re-entrant IO-subsystem init (`sub_8260CC50`) crash-loops on a null deref after boot (current top blocker)
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
 - Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)
-- Cathedral loading screen doesn't advance to gameplay (world loading not completing)
 - Second+ Bink videos blocked (garbage allocation crash)
-- Physics/world systems not initialized (function pointer at 0x8370F248 stays null)
 
 ## Related Projects
 
