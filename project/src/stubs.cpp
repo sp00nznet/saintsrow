@@ -15,7 +15,10 @@
 #include <cstdio>
 #include <chrono>
 #include <thread>
+#include <mutex>
+#include <unordered_map>
 #include <atomic>
+#include <cstring>
 
 // Worker thread semaphore handles captured from sub_826368E0
 static uint32_t g_worker_sem_handles[16] = {};
@@ -382,16 +385,251 @@ PPC_FUNC(sub_822827B0) {
 TRACE_STATE("VideoMgr", 821FB9D8)
 // VideoDriver - trace video queue state
 extern "C" void __imp__sub_821FBD10(PPCContext& ctx, uint8_t* base);
+// Read a NUL-terminated guest string into a host buffer (for progress logging).
+static void gstr(uint8_t* base, uint32_t addr, char* out, int n) {
+    int i = 0;
+    if (addr >= 0x82000000 && addr < 0x84000000) {
+        for (; i < n - 1; i++) { char ch = (char)PPC_LOAD_U8(addr + i); if (!ch) break; out[i] = ch; }
+    }
+    out[i] = 0;
+}
+
 extern "C" void __imp__sub_825BFC10(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_825BFC10) {
-    __imp__sub_825BFC10(ctx, base);
-    static int c = 0;
-    if (++c <= 5) {
-        uint32_t queue = ctx.r3.u32;
-        uint32_t item = queue ? PPC_LOAD_U32(queue + 8) : 0;
+    uint32_t arg = ctx.r3.u32;
+    // sub_825BFC10 is a generic table/resource loader: r3 is a filename string
+    // when called from sub_82185498 (e.g. "multiplayer_levels.xtbl"). Log the
+    // name so we can see how far the front-end init (sub_82185498) progresses.
+    char name[64]; gstr(base, arg, name, sizeof(name));
+    static int nc = 0;
+    if (name[0] && ++nc <= 40) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[VideoQueue #%d] queue=0x%08X [queue+8]=0x%08X\n", c, queue, item); fclose(f); }
+        if (f) { fprintf(f, "[TblLoad #%d] sub_825BFC10(\"%s\") ENTER\n", nc, name); fclose(f); }
     }
+    __imp__sub_825BFC10(ctx, base);
+    if (name[0] && nc <= 40) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[TblLoad #%d] sub_825BFC10(\"%s\") RETURNED r3=0x%08X\n", nc, name, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// ---- sub_82185498 (front-end init) progress markers ----
+// byte_8370DA94 is set ONLY at the very end of sub_82185498; runtime shows it
+// never gets set, so the init hangs partway. These markers bracket where.
+extern "C" void __imp__sub_822A8608(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822A8608) {        // line 694: "unlockable_interface_script.xtbl"
+    static bool once = false;
+    char name[64]; gstr(base, ctx.r4.u32, name, sizeof(name));
+    if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[InitMark A] sub_822A8608 r4=\"%s\" (line~694)\n", name); fclose(f); } }
+    __imp__sub_822A8608(ctx, base);
+}
+extern "C" void __imp__sub_821162F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821162F0) {        // line 781: "spawn_info_ranks.xtbl"
+    static bool once = false;
+    char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
+    if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[InitMark B] sub_821162F0 r3=\"%s\" (line~781)\n", name); fclose(f); } }
+    __imp__sub_821162F0(ctx, base);
+}
+extern "C" void __imp__sub_821F4410(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821F4410) {        // line 927: "cheats.xtbl"
+    static bool once = false;
+    char name[64]; gstr(base, ctx.r7.u32, name, sizeof(name));
+    if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[InitMark C] sub_821F4410 r7=\"%s\" (line~927)\n", name); fclose(f); } }
+    __imp__sub_821F4410(ctx, base);
+}
+// sub_82645660 = .peg asset loader. sub_82185498 loads "env_maps.peg" (line 465)
+// then "always_loaded.peg" (line 466). A synchronous peg load that blocks on
+// streaming IO is the prime suspect for the init hang. Log ENTER/RETURN per
+// filename: an ENTER with no matching RETURN pinpoints the hanging load.
+extern "C" void __imp__sub_82645660(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82645660) {
+    char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
+    static int pc = 0;
+    int myc = (name[0] ? ++pc : 0);
+    if (myc && pc <= 60) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[Peg #%d] sub_82645660(\"%s\") ENTER\n", myc, name); fclose(f); }
+    }
+    __imp__sub_82645660(ctx, base);
+    if (myc && pc <= 60) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[Peg #%d] sub_82645660(\"%s\") RETURNED r3=0x%08X\n", myc, name, ctx.r3.u32); fclose(f); }
+    }
+}
+
+// ---- finer brackets for sub_82185498 lines 467..694 (peg loads OK; hang here) ----
+extern "C" void __imp__sub_826F92F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_826F92F8) {        // ".anim" loader (called many times during init)
+    char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
+    static int dc = 0; int myc = ++dc;
+    // The anim-preload routine ends by re-loading the watermelon anims; mark
+    // "anims done" when the 2nd PML1_Watermelon_Long load returns, so the
+    // post-anim markers below capture the next sub_82185498 call.
+    extern std::atomic<int> g_after_anims;
+    if (myc > 1000 && (name[0]=='P'||name[0]=='p') && strstr(name, "atermelon_Long")) {
+        g_after_anims.store(1);
+    }
+    bool tail = (myc > 3680 && myc < 4100);   // verbose window around the plateau
+    if (myc <= 3 || myc % 100 == 0 || tail) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[AnimLoad #%d] \"%s\" ENTER\n", myc, name); fclose(f); }
+    }
+    __imp__sub_826F92F8(ctx, base);
+    if (tail) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[AnimLoad #%d] \"%s\" RETURNED r3=0x%08X\n", myc, name, ctx.r3.u32); fclose(f); }
+    }
+}
+std::atomic<int> g_after_anims{0};
+// Post-anim-preload markers: log the FIRST ENTER/RETURN of each once the anim
+// phase is done (g_after_anims==1). The first marker showing ENTER with no
+// RETURN is the hanging call. Covers sub_82185498 lines 522..527.
+#define POSTANIM_MARK(fn, lineno)                                                      \
+    extern "C" void __imp__##fn(PPCContext& ctx, uint8_t* base);                       \
+    PPC_FUNC(fn) {                                                                     \
+        static bool logged = false;                                                    \
+        bool go = g_after_anims.load() && !logged;                                     \
+        if (go) { logged = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");      \
+            if (f) { fprintf(f, "[PostAnim] " #fn " ENTER (line~" #lineno ") r3=0x%08X\n", ctx.r3.u32); fclose(f); } } \
+        __imp__##fn(ctx, base);                                                        \
+        if (go) { FILE* f = fopen("saintsrow_heartbeat.log", "a");                     \
+            if (f) { fprintf(f, "[PostAnim] " #fn " RETURNED (line~" #lineno ") r3=0x%08X\n", ctx.r3.u32); fclose(f); } } \
+    }
+POSTANIM_MARK(sub_82406E40, 522)
+POSTANIM_MARK(sub_8222A750, 523)
+POSTANIM_MARK(sub_822388A8, 524)
+POSTANIM_MARK(sub_82519DC8, 525)
+POSTANIM_MARK(sub_8224C510, 526)
+POSTANIM_MARK(sub_826335C0, 527)
+// sub_8224C510 (physics/Havok init) is the hang; bracket its early sub-calls
+// (suffix = its own decompile line).
+POSTANIM_MARK(sub_826C3430, phys_p38)
+POSTANIM_MARK(sub_826DB590, phys_p59)
+POSTANIM_MARK(sub_826C8868, phys_p70)
+POSTANIM_MARK(sub_826992F8, phys_p73)
+// sub_826C98D8 (Havok base/world init) is the hang. Bracket ITS sub-calls
+// (suffix = sub_826C98D8's own decompile line). Last ENTER-without-RETURN wins.
+POSTANIM_MARK(sub_826E3B30, hk_171)
+POSTANIM_MARK(sub_826B34B0, hk_391)
+POSTANIM_MARK(sub_82732A88, hk_453)
+POSTANIM_MARK(sub_826E8E10, hk_505)
+POSTANIM_MARK(sub_826DBD10, hk_521)
+POSTANIM_MARK(sub_826C6B08, hk_527)
+POSTANIM_MARK(sub_826C8028, hk_529)
+POSTANIM_MARK(sub_826DB810, hk_541)
+POSTANIM_MARK(sub_826E8F88, hk_544)
+// Narrowed: hang is in lines 171..369 of sub_826C98D8 (sub_826E3B30 returns,
+// sub_826E9A48 not reached). The only calls there are the Havok version-mismatch
+// banner/error block (188..201, runs only if r6 != 30300/0x765C).
+POSTANIM_MARK(sub_827590A0, hk_359)
+POSTANIM_MARK(sub_826E9A48, hk_369)
+POSTANIM_MARK(sub_826E7D98, hk_387)
+POSTANIM_MARK(sub_826C1D78, hk_188_bannerStart)
+POSTANIM_MARK(sub_826C1DF8, hk_201_bannerEnd)
+// line 354 off_827A7230() -> sub_8267C3C8 -> sub_8267AAA0. Confirmed: returns fine.
+POSTANIM_MARK(sub_8267C3C8, hk_354_offcall)
+POSTANIM_MARK(sub_8267AAA0, hk_354_inner)
+// Havok alloc path: sub_82277300 (vtable[0]) -> sub_82277618 (lookup) ->
+// sub_826C19A8 (off_827A775C, allocate). Bracket all three; fopen is gated behind
+// g_after_anims + a shared cap so the boot-time hot path stays cheap. The last
+// unmatched ENTER (no RET) is the infinite loop.
+static std::atomic<int> g_hkalloc_log{0};
+#define ALLOCMARK(fn) \
+    extern "C" void __imp__##fn(PPCContext& ctx, uint8_t* base); \
+    PPC_FUNC(fn) { \
+        bool go = g_after_anims.load(); int myc = 0; \
+        if (go && (myc = g_hkalloc_log.fetch_add(1)) < 6000) { \
+            FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+            if (f) { fprintf(f, "[A] " #fn " ENTER #%d sz=%u\n", myc, ctx.r4.u32); fclose(f); } \
+        } else myc = 1 << 30; \
+        __imp__##fn(ctx, base); \
+        if (go && myc < 6000) { \
+            FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
+            if (f) { fprintf(f, "[A] " #fn " RET #%d\n", myc); fclose(f); } \
+        } \
+    }
+ALLOCMARK(sub_82277300)
+ALLOCMARK(sub_82277618)
+ALLOCMARK(sub_826C19A8)
+
+// sub_82702D20 = memcpy(dst, src, n). The watchdog caught the main thread spinning
+// here with a huge CTR -> a memcpy with a garbage/huge size. Log only absurd sizes
+// (the bug) plus the caller (LR) so we find the bad call site. Cheap: 1 compare/call.
+extern "C" void __imp__sub_82702D20(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82702D20) {
+    uint32_t n = ctx.r5.u32;
+    if (n > 0x01000000) {  // >16MB memcpy is a size underflow (e.g. erase-from-empty
+        // array: count-4 wraps to 0xFFFFFFFC). Largest real init copy is ~256KB.
+        // Treat as a no-op: copying ~4GB from a null ptr would hang/crash, and the
+        // degenerate case (empty array element removal) is correctly a no-op.
+        static int c = 0;
+        if (++c <= 30) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[BAD-MEMCPY #%d SKIPPED] dst=0x%08X src=0x%08X n=0x%08X caller_lr=0x%08X\n",
+                c, ctx.r3.u32, ctx.r4.u32, n, (uint32_t)ctx.lr); fclose(f); }
+        }
+        ctx.r3.u64 = ctx.r3.u32;  // memcpy returns dst
+        return;
+    }
+    __imp__sub_82702D20(ctx, base);
+}
+
+// NOTE: sub_82277300 = Havok allocator (vtable[0]); it does
+// RtlEnterCriticalSection(this+112) -> alloc -> RtlLeaveCriticalSection.
+// Hooking it directly is too hot (called from boot onward) and stalls the game,
+// so confirmation of the CS deadlock must be done via the RtlEnterCriticalSection
+// hook logging only slow/contended enters, not a per-alloc hook.
+// Custom hook for sub_826C98D8: log entry args — r6 is the Havok build version;
+// if r6 != 30300 (0x765C) the mismatch error path (line 194, hkWorld.cpp:2248) runs.
+extern "C" void __imp__sub_826C98D8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_826C98D8) {
+    static bool once = false;
+    if (g_after_anims.load() && !once) {
+        once = true;
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        // Resolve the Havok allocator (dword_8283BE44) and its vtable methods so
+        // we can decompile the one that hangs (vtable+16 used at lines 358/363/368).
+        uint32_t alloc_obj = PPC_LOAD_U32(0x8283BE44);
+        uint32_t vt = alloc_obj ? PPC_LOAD_U32(alloc_obj) : 0;
+        uint32_t m16 = vt ? PPC_LOAD_U32(vt + 16) : 0;
+        uint32_t m24 = vt ? PPC_LOAD_U32(vt + 24) : 0;
+        if (f) { fprintf(f, "[HavokInit] sub_826C98D8 ENTER r3=0x%08X r5=0x%08X(ver) r6=0x%08X | alloc=0x%08X vt=0x%08X vt+16=0x%08X vt+24=0x%08X\n",
+            ctx.r3.u32, ctx.r5.u32, ctx.r6.u32, alloc_obj, vt, m16, m24); fclose(f); }
+    }
+    __imp__sub_826C98D8(ctx, base);
+    if (g_after_anims.load()) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[HavokInit] sub_826C98D8 RETURNED r3=0x%08X\n", ctx.r3.u32); fclose(f); }
+    }
+}
+extern "C" void __imp__sub_8221CAC8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221CAC8) {        // line 532: "preload.vpp" (only if byte_8370D671)
+    static bool once = false;
+    char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
+    if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[InitMark E1] sub_8221CAC8 vpp=\"%s\" D671=%u (line~532)\n", name, PPC_LOAD_U8(0x8370D671)); fclose(f); } }
+    __imp__sub_8221CAC8(ctx, base);
+    { FILE* f = fopen("saintsrow_heartbeat.log", "a");
+      if (f) { fprintf(f, "[InitMark E1-ret] sub_8221CAC8 vpp=\"%s\" RETURNED\n", name); fclose(f); } }
+}
+extern "C" void __imp__sub_8221C6E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221C6E0) {        // line 536: else-branch package load
+    static bool once = false;
+    if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[InitMark E2] sub_8221C6E0 r3=0x%08X D671=%u (line~536)\n", ctx.r3.u32, PPC_LOAD_U8(0x8370D671)); fclose(f); } }
+    __imp__sub_8221C6E0(ctx, base);
+    { static bool r=false; if(!r){r=true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+      if (f) { fprintf(f, "[InitMark E2-ret] sub_8221C6E0 RETURNED r3=0x%08X\n", ctx.r3.u32); fclose(f); } } }
+}
+extern "C" void __imp__sub_825CD1F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_825CD1F8) {        // line 644: 960x960 render target create
+    static bool once = false;
+    if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[InitMark F] sub_825CD1F8(%u,%u,..) (line~644)\n", ctx.r3.u32, ctx.r4.u32); fclose(f); } }
+    __imp__sub_825CD1F8(ctx, base);
 }
 // Hook sub_826FE350 (comparison function) to see what's being compared
 extern "C" void __imp__sub_826FE350(PPCContext& ctx, uint8_t* base);
@@ -686,32 +924,40 @@ PPC_FUNC(sub_82186F08) {
 extern "C" void __imp__RtlEnterCriticalSection(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__RtlLeaveCriticalSection(PPCContext& ctx, uint8_t* base);
 
+// CS deadlock detector: track which host thread currently holds each guest CS.
+// On a contended Enter we log CS-WAIT *before* blocking and CS-GOT *after*; the
+// deadlocking Enter shows as a CS-WAIT with no matching CS-GOT. same=1 means the
+// SAME thread already holds it (recursion into a non-recursive CS); same=0 means a
+// different thread holds it (cross-thread deadlock / crashed holder). Logging only
+// fires on contention (holder != 0), so the hot uncontended path stays cheap.
+static std::mutex g_cs_mtx;
+static std::unordered_map<uint32_t, uint32_t> g_cs_holder;  // cs_addr -> host tid
+static inline uint32_t host_tid() {
+    return (uint32_t)std::hash<std::thread::id>{}(std::this_thread::get_id());
+}
 PPC_FUNC(sub_82788704) {  // RtlEnterCriticalSection
-    static int ec = 0;
     uint32_t cs_addr = ctx.r3.u32;
-    // Check lock_count before entering - if contended, log it
-    int32_t lock_count = (int32_t)PPC_LOAD_U32(cs_addr + 4);  // lock_count offset
-    uint32_t owner = PPC_LOAD_U32(cs_addr + 12);  // owning_thread offset
-    if (++ec <= 50 || lock_count >= 0) {
+    uint32_t me = host_tid();
+    uint32_t holder = 0;
+    { std::lock_guard<std::mutex> g(g_cs_mtx); auto it = g_cs_holder.find(cs_addr); if (it != g_cs_holder.end()) holder = it->second; }
+    bool contended = (holder != 0);
+    if (contended) {
+        uint32_t owner_guest = PPC_LOAD_U32(cs_addr + 12);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) {
-            fprintf(f, "[CS-ENTER #%d] cs=0x%08X lock=%d owner=0x%08X\n",
-                ec, cs_addr, lock_count, owner);
-            fclose(f);
-        }
+        if (f) { fprintf(f, "[CS-WAIT] cs=0x%08X me=0x%08X holder=0x%08X same=%d ownerGuest=0x%08X\n",
+            cs_addr, me, holder, holder == me, owner_guest); fclose(f); }
     }
     __imp__RtlEnterCriticalSection(ctx, base);
+    { std::lock_guard<std::mutex> g(g_cs_mtx); g_cs_holder[cs_addr] = me; }
+    if (contended) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[CS-GOT ] cs=0x%08X me=0x%08X\n", cs_addr, me); fclose(f); }
+    }
 }
 
 PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
-    static int lc = 0;
-    if (++lc <= 50) {
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) {
-            fprintf(f, "[CS-LEAVE #%d] cs=0x%08X\n", lc, ctx.r3.u32);
-            fclose(f);
-        }
-    }
+    uint32_t cs_addr = ctx.r3.u32;
+    { std::lock_guard<std::mutex> g(g_cs_mtx); g_cs_holder.erase(cs_addr); }
     __imp__RtlLeaveCriticalSection(ctx, base);
 }
 
@@ -725,6 +971,31 @@ PPC_FUNC(sub_82716020) {
     static int call_count = 0;
     call_count++;
     __imp__sub_82716020(ctx, base);
+
+    // DIAGNOSTIC (force-flag disabled): observe the natural loading-completion
+    // chain instead of short-circuiting it.
+    //   sub_82185498 sets byte_8370DA94 when front-end content is ready
+    //   -> sub_821FF480 runs a 500ms fade flt_8370D1A4 0->1
+    //   -> byte_8370DA95=1 -> loader thread sub_82186AF0 sets byte_8370D6C9=1
+    //   -> main spin loop exits into real game loop sub_82186C10.
+    if ((call_count <= 20) || (call_count % 240 == 0)) {
+        uint32_t fbits = PPC_LOAD_U32(0x8370D1A4);
+        float fade; memcpy(&fade, &fbits, 4);
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "[LoadChain #%d] r3=%d DA94(ready)=%u fade[D1A4]=%.4f DA95(done)=%u D6C9(complete)=%u DA95b=%u\n",
+                call_count, ctx.r3.s32,
+                PPC_LOAD_U8(0x8370DA94), fade,
+                PPC_LOAD_U8(0x8370DA95), PPC_LOAD_U8(0x8370D6C9),
+                PPC_LOAD_U8(0x8370DA95));
+            fclose(f);
+        }
+    }
+    // Force the "loading complete" flag so the main loop leaves the spin and
+    // enters the real game loop sub_82186C10 (restores the cathedral render).
+    // This is a known short-circuit; the real fix is making sub_82185498
+    // (front-end init) complete so byte_8370DA94 -> fade -> byte_8370D6C9
+    // happens naturally.
     if (call_count == 5) {
         PPC_STORE_U8(0x8370D6C9, 1);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");

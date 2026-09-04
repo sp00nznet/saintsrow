@@ -44,7 +44,7 @@ static uint32_t g_null_object_guest_addr = 0;  // Guest address for PPC loads
 #include <tlhelp32.h>
 
 static void WatchdogThread() {
-    Sleep(5000);
+    Sleep(8000);
     DWORD pid = GetCurrentProcessId();
     DWORD my_tid = GetCurrentThreadId();
     HMODULE exe = GetModuleHandleA(NULL);
@@ -55,7 +55,7 @@ static void WatchdogThread() {
 
     FILE* wf = fopen("saintsrow_watchdog.log", "w");
     if (!wf) return;
-    for (int s = 0; s < 10; s++) {
+    for (int s = 0; s < 40; s++) {   // sample seconds ~8..68 to cover the hang
         fprintf(wf, "--- Sample %d ---\n", s);
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
         if (snap != INVALID_HANDLE_VALUE) {
@@ -96,7 +96,7 @@ static void WatchdogThread() {
             CloseHandle(snap);
         }
         fflush(wf);
-        Sleep(1000);
+        Sleep(1500);
     }
     fclose(wf);
 }
