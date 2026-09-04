@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: 3D Rendering Active -- Cathedral Scene with Correct Sky Rendering**
+**Status: Rebased on ReXGlue SDK 0.10.0 -- boots past the loading queue into front-end init**
 
 ![Saints Row Logo Screen](logo.png)
 ![Cathedral Loading Screen](newscreen2.png)
@@ -62,7 +62,7 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Analyze kernel imports (266 kernel + 204 XAM)
 - [x] Run XenonRecomp first pass (33,725 functions -> 122 MB C++)
 - [x] Resolve unrecognized instructions (vandc, mulhdu, frsqrte, dcbst)
-- [x] Create project scaffold (CMake + ReXGlue SDK v0.7.0)
+- [x] Create project scaffold (CMake + ReXGlue SDK v0.10.0)
 - [x] First compilation (45 MB native x86-64 executable)
 - [x] First boot -- game entry point executes, loads all packfiles
 - [x] D3D12 GPU initialization (NVIDIA RTX 5070, ROV, tier 3)
@@ -87,7 +87,10 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Headless static-analysis pipeline (IDA Pro + Ghidra) byte-aligned to the recomp image
 - [x] Boot/splash sequence confirmed to complete naturally (state 1 -> 2 -> 3, 151-item queue drains)
 - [x] Root-caused the post-boot crash to a re-entrant IO-init null deref (see below)
-- [ ] Fix re-entrant IO-subsystem init crash loop (sub_8260CC50)
+- [x] Rebase onto ReXGlue SDK 0.10.0 (manifest codegen, ReXApp, GPU plugin)
+- [x] Boot past the 151-item content queue: state 1 -> 2 -> 3, front-end .xtbl loading starts
+- [ ] Fix null virtual call in front-end init (sub_82105FE8, see below)
+- [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
 - [ ] In-game rendering
@@ -113,6 +116,59 @@ After loading, PostLoop5 runs the main game loop calling GL2_Render at ~30fps. T
 - **Null page threshold**: Guest addresses < 256MB treated as null dereferences to prevent demand-page exhaustion
 - **VEH ultra-fast path**: Handles bad vtable dispatches at fault_addr=0x8000001E without overhead
 
+### SDK 0.10.0 Rebase (2026-09-04)
+
+Moved from ReXGlue 0.7.0 to 0.10.0 (321 upstream commits). What changed on our side:
+
+- **Manifest codegen.** `config/saintsrow_rexglue.toml` became `project/saintsrow_manifest.toml`
+  with `[project]` / `[entrypoint]` sections. The ABI helper addresses
+  (savegprlr/restgprlr/savefpr/restfpr/savevmx/restvmx) are auto-detected now, so they are gone
+  from the config. Codegen is incremental and runs as a build step; a full regen is ~8s.
+- **Adjustor thunks must be declared.** 0.10.0's scanner does not emit the packed
+  8-byte `addi rX,rX,-N; b target` thunk tables, because only vtables reference them --
+  an indirect call through one aborts with "Call to invalid or unregistered function".
+  The manifest now declares the 40 missing thunks plus the 9 branch targets they jump to,
+  found by scanning for runs of >= 3 consecutive thunk pairs.
+- **ReXApp.** `main.cpp` no longer hand-rolls runtime setup, window creation and module
+  launch; `SaintsRowApp` derives from `rex::ReXApp` and overrides only `OnPreSetup`
+  (GPU plugin), `OnConfigurePaths`, `OnPostLoadXexImage` (null page + VEH) and
+  `OnPreLaunchModule` (watchdog). Roughly 150 lines of bootstrap deleted.
+- **Recomp macro rename.** `PPC_FUNC`/`PPC_FUNC_IMPL` -> `REX_EXTERN`, `PPC_LOAD_*`/`PPC_STORE_*`
+  -> `REX_LOAD_*`/`REX_STORE_*`, `ppc_pvoid_t`/`ppc_pu32_t`/`ppc_u32_t` -> `mapped_void`/
+  `mapped_u32`/`u32`, `rex::HostToGuestFunction` -> `rex::ppc::HostToGuestFunction`.
+  Generated symbols are `extern "C"` now, so stub overrides must be too.
+- **The GPU moved behind a plugin.** `rexgpu-xenos.dll` exports only `rex_gpu_create`, so
+  `CommandProcessor::IssueSwap` / `CallInThread` / `InvalidateGpuMemory` /
+  `WriteRegistersFromMem` are no longer reachable from the host. `InitializeRingBuffer` and
+  `EnableReadPointerWriteBack` survive as `IGraphicsSystem` virtuals; everything else now
+  goes through the GPU MMIO window at `0x7FC80000` (`0x01C5` = CP_RB_WPTR, `0x4800..` =
+  fetch constants). The "force an IssueSwap from GL2_Render" presentation hack is gone.
+- **Abort diagnostics.** `REX_FATAL` ends in `std::abort()`, which names no guest code.
+  A `SIGABRT` handler now dumps the aborting guest thread's `PPCContext`, so an invalid
+  indirect call reports its exact call site (`lr`) and target.
+
+Two SDK patches are still required on top of v0.10.0 and are re-applied to the source tree:
+`CommandProcessor::ExecuteIndirectBuffer`/`ExecutePacket` need a `count == 0` guard (a
+zero-capacity `RingBuffer` divides by zero in `set_write_offset`), and `XexModule::ReadImage`
+must skip `LookupHeap(base)->Reset()`, which wipes the function dispatcher's allocation.
+
+**Where it gets to now.** Further than the 0.7.0 build: the boot state machine advances
+1 -> 2 -> 3, the 151-item content queue drains completely, and front-end init starts loading
+`.xtbl` tables (`death_faces`, `focused_audio`, `voice_distances`, `reverb`, ...). The old top
+blocker -- the re-entrant IO-init crash loop -- no longer fires.
+
+**Current blocker.** `sub_82105FE8` iterates a list at `[r26+8]` and makes a virtual call on
+each entry. The entry is null (`r3 = 0`), so the vtable read returns garbage and the call
+target is `0x0000000F`. The list slot is populated from `sub_8260F990`, which creates an object
+through `sub_82623250(0x61820006, &out)` -- a type-ID class factory. Something in that creation
+path fails and leaves the slot null.
+
+**Presentation regression.** Removing the forced `IssueSwap` exposed a malformed PM4 stream:
+the CP reports `ExecutePacketType0 overflow` on the indirect buffers our `sub_825D3580` hook
+builds, so frames no longer reach the screen. The hand-built IB path predates 0.10.0's memory
+changes -- note the new `REX_PHYS_HOST_OFFSET` (+0x1000 for guest physical >= 0xE0000000, which
+covers the primary ring buffer at `0xE98B7000`) -- and needs revisiting.
+
 ### Latest Investigation (2026-05-31)
 
 A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image, cross-checked against the generated PPC) corrected two long-standing assumptions and pinpointed the real post-boot blocker:
@@ -124,7 +180,8 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 
 ### Known Issues
 
-- Re-entrant IO-subsystem init (`sub_8260CC50`) crash-loops on a null deref after boot (current top blocker)
+- Null virtual call in front-end init (`sub_82105FE8`) aborts the game (current top blocker)
+- PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
 - Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)
 - Second+ Bink videos blocked (garbage allocation crash)
@@ -139,7 +196,7 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 ## Prerequisites
 
 - Python 3.8+ with `pycryptodome`
-- CMake 3.25+, Ninja, Clang 18+ (clang-cl on Windows)
+- CMake 3.25+, Ninja, Clang 18+ (built here with LLVM 21.1.8 + MSVC 2022 for the Windows SDK)
 - MSVC 2022 (for Windows SDK headers)
 - [360tools](https://github.com/sp00nznet/360tools)
 

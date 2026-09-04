@@ -9,10 +9,8 @@
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",
-                "CMAKE_BUILD_TYPE": "Release"
-            },
-            "environment": {
-                "REXSDK": "${sourceDir}/../tools/rexglue-sdk-prebuilt/win-amd64"
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/../tools/rexglue-sdk/out/install/win-amd64"
             },
             "condition": {
                 "type": "equals",

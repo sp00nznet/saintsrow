@@ -2,13 +2,17 @@
 // These override default ReXGlue SDK implementations where the game
 // needs special handling.
 
-#include "saintsrow_config.h"
+#include "saintsrow_pch.h"
 #include "saintsrow_init.h"
 
 #include <rex/logging.h>
 #include <rex/system/kernel_state.h>
-#include <rex/graphics/graphics_system.h>
-#include <rex/graphics/command_processor.h>
+#include <rex/system/interfaces/graphics.h>
+
+// SDK 0.10 moved the GPU behind the rexgpu-xenos plugin: the host reaches it
+// through IGraphicsSystem's virtuals plus the GPU MMIO window at 0x7FC80000
+// (see GraphicsSystem::WriteRegister -- 0x01C5 = CP_RB_WPTR).
+#define REX_GPU_REG(index) (0x7FC80000u + (index) * 4u)
 #include <rex/runtime.h>
 
 #include <cstdint>
@@ -77,7 +81,7 @@ extern "C" void XamUserGetSigninInfo_entry(
 extern "C" void __imp__sub_82789600(PPCContext& ctx, uint8_t* base); // BinkDoFrame
 extern "C" void __imp__sub_82789658(PPCContext& ctx, uint8_t* base); // BinkWait
 extern "C" void __imp__sub_82789EE8(PPCContext& ctx, uint8_t* base); // BinkOpen
-PPC_FUNC(sub_82789600) { // BinkDoFrame
+REX_EXTERN(sub_82789600) { // BinkDoFrame
     static int c = 0;
     if (++c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[BinkDoFrame #%d] handle=0x%08X\n", c, ctx.r3.u32); fclose(f); } }
@@ -85,18 +89,18 @@ PPC_FUNC(sub_82789600) { // BinkDoFrame
     if (c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[BinkDoFrame #%d] returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); } }
 }
-PPC_FUNC(sub_82789658) { // BinkWait
+REX_EXTERN(sub_82789658) { // BinkWait
     static int c = 0;
     __imp__sub_82789658(ctx, base);
     if (++c <= 5) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[BinkWait #%d] returned r3=%u\n", c, ctx.r3.u32); fclose(f); } }
 }
-PPC_FUNC(sub_82789EE8) { // BinkOpen
+REX_EXTERN(sub_82789EE8) { // BinkOpen
     static int c = 0;
     c++;
     char fn[256] = {0};
     if (ctx.r3.u32) {
-        for (int i = 0; i < 255; i++) { fn[i] = (char)PPC_LOAD_U8(ctx.r3.u32 + i); if (!fn[i]) break; }
+        for (int i = 0; i < 255; i++) { fn[i] = (char)REX_LOAD_U8(ctx.r3.u32 + i); if (!fn[i]) break; }
     }
     if (c <= 5) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -123,7 +127,7 @@ PPC_FUNC(sub_82789EE8) { // BinkOpen
 // r31 comes from a global pointer chain in the render wait thread
 // Let's hook sub_825E5320 (render) and sub_825E54A8 (swap) directly instead
 extern "C" void __imp__sub_825E5320(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825E5320) {
+REX_EXTERN(sub_825E5320) {
     static int c = 0;
     if (++c <= 5) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -140,23 +144,23 @@ PPC_FUNC(sub_825E5320) {
 // The skip flag is at [r31 + 19980] inside the function
 // r31 comes from [[0x82800658]] (same as render wait thread)
 extern "C" void __imp__sub_825E54A8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825E54A8) {
+REX_EXTERN(sub_825E54A8) {
     // Force ALL rendering flags to get VdSwap called AND ring buffer kicked:
     uint32_t r31_val = ctx.r3.u32;
     if (r31_val) {
-        PPC_STORE_U32(r31_val + 19980, 0);    // skip flag = 0 (gates VdSwap call)
-        uint8_t dirty = PPC_LOAD_U8(r31_val + 20424);
-        PPC_STORE_U8(r31_val + 20424, dirty | 0x8);  // dirty flag (gates render sub calls)
+        REX_STORE_U32(r31_val + 19980, 0);    // skip flag = 0 (gates VdSwap call)
+        uint8_t dirty = REX_LOAD_U8(r31_val + 20424);
+        REX_STORE_U8(r31_val + 20424, dirty | 0x8);  // dirty flag (gates render sub calls)
         // Force frame counter at [r31+20080] to non-zero (gates buffer queue setup)
-        uint32_t fc = PPC_LOAD_U32(r31_val + 20080);
+        uint32_t fc = REX_LOAD_U32(r31_val + 20080);
         if (fc == 0) {
-            PPC_STORE_U32(r31_val + 20080, 1);
+            REX_STORE_U32(r31_val + 20080, 1);
         }
         // Set "direct write" bit at [r31+10809] |= 0x2
         // This gates the CP_RB_WPTR write in sub_825D3580 (ring buffer kick)
         // Without this, VdSwap writes packets but GPU never processes them
-        uint8_t dw = PPC_LOAD_U8(r31_val + 10809);
-        PPC_STORE_U8(r31_val + 10809, dw | 0x2);
+        uint8_t dw = REX_LOAD_U8(r31_val + 10809);
+        REX_STORE_U8(r31_val + 10809, dw | 0x2);
         static int logc = 0;
         if (++logc <= 5) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -165,11 +169,11 @@ PPC_FUNC(sub_825E54A8) {
     }
     // Log state JUST before calling real function
     if (r31_val) {
-        uint32_t skip_val = PPC_LOAD_U32(r31_val + 19980);
-        uint32_t fc_val = PPC_LOAD_U32(r31_val + 20080);
-        uint8_t dirty_val = PPC_LOAD_U8(r31_val + 20424);
-        uint32_t q1 = PPC_LOAD_U32(r31_val + 20072);
-        uint32_t q2 = PPC_LOAD_U32(r31_val + 20076);
+        uint32_t skip_val = REX_LOAD_U32(r31_val + 19980);
+        uint32_t fc_val = REX_LOAD_U32(r31_val + 20080);
+        uint8_t dirty_val = REX_LOAD_U8(r31_val + 20424);
+        uint32_t q1 = REX_LOAD_U32(r31_val + 20072);
+        uint32_t q2 = REX_LOAD_U32(r31_val + 20076);
         static int pre = 0;
         if (++pre <= 10) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -182,8 +186,8 @@ PPC_FUNC(sub_825E54A8) {
 
     // After: check if VdSwap was reached
     if (r31_val) {
-        uint32_t rb_ptr = PPC_LOAD_U32(r31_val + 40);
-        uint32_t skip_after = PPC_LOAD_U32(r31_val + 19980);
+        uint32_t rb_ptr = REX_LOAD_U32(r31_val + 40);
+        uint32_t skip_after = REX_LOAD_U32(r31_val + 19980);
         static int pc = 0;
         if (++pc <= 10) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -194,7 +198,7 @@ PPC_FUNC(sub_825E54A8) {
 
 // Render wait thread - run naturally
 extern "C" void __imp__sub_825DF970(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825DF970) {
+REX_EXTERN(sub_825DF970) {
     __imp__sub_825DF970(ctx, base);
 }
 
@@ -208,12 +212,12 @@ extern "C" void __imp__sub_82653F98(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_827166C0(PPCContext& ctx, uint8_t* base);
 
 // Hook sub_82653F98 (scene/camera tick) - this was crashing through XamInputGetKeystrokeEx
-PPC_FUNC(sub_82653F98) {
+REX_EXTERN(sub_82653F98) {
     static int c = 0;
     c++;
     if (c <= 10 || c % 500 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[SceneTick #%d] ENTER state=%u\n", c, PPC_LOAD_U32(0x8370DD7C)); fclose(f); }
+        if (f) { fprintf(f, "[SceneTick #%d] ENTER state=%u\n", c, REX_LOAD_U32(0x8370DD7C)); fclose(f); }
     }
     __imp__sub_82653F98(ctx, base);
     if (c <= 10 || c % 500 == 0) {
@@ -223,7 +227,7 @@ PPC_FUNC(sub_82653F98) {
 }
 
 // Hook sub_827166C0 -- reads TLS r13+256 -> [+332] to get GPU/render context
-PPC_FUNC(sub_827166C0) {
+REX_EXTERN(sub_827166C0) {
     __imp__sub_827166C0(ctx, base);
     static int tls_log_count = 0;
     if (++tls_log_count <= 10) {
@@ -231,7 +235,7 @@ PPC_FUNC(sub_827166C0) {
         if (tf) {
             fprintf(tf, "sub_827166C0: r13=0x%08X, TLS[256]=0x%08X, result r3=0x%08X\n",
                 ctx.r13.u32,
-                (ctx.r13.u32 ? PPC_LOAD_U32(ctx.r13.u32 + 256) : 0),
+                (ctx.r13.u32 ? REX_LOAD_U32(ctx.r13.u32 + 256) : 0),
                 ctx.r3.u32);
             fclose(tf);
         }
@@ -242,7 +246,7 @@ PPC_FUNC(sub_827166C0) {
 extern "C" void __imp__sub_82648ED8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_82186F08(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82648ED8) {
+REX_EXTERN(sub_82648ED8) {
     static int count = 0;
     count++;
     if (count <= 10) {
@@ -253,14 +257,14 @@ PPC_FUNC(sub_82648ED8) {
 
     if (count <= 10) {
         FILE* hf = fopen("saintsrow_heartbeat.log", "a");
-        if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X state=%u\n", count, ctx.r3.u32, PPC_LOAD_U32(0x8370DD7C)); fclose(hf); }
+        if (hf) { fprintf(hf, "[TICK-648ED8] #%d EXIT r3=0x%08X state=%u\n", count, ctx.r3.u32, REX_LOAD_U32(0x8370DD7C)); fclose(hf); }
     }
 }
 
 // Trace each sub-call in the main game loop (sub_82186F08)
 #define TRACE_CALL(name, addr) \
     extern "C" void __imp__sub_##addr(PPCContext& ctx, uint8_t* base); \
-    PPC_FUNC(sub_##addr) { \
+    REX_EXTERN(sub_##addr) { \
         static int _c = 0; _c++; \
         if (_c <= 10) { FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
             if (f) { fprintf(f, "[" name "] ENTER #%d\n", _c); fclose(f); } } \
@@ -272,10 +276,10 @@ PPC_FUNC(sub_82648ED8) {
 // Trace with state monitoring
 #define TRACE_STATE(name, addr) \
     extern "C" void __imp__sub_##addr(PPCContext& ctx, uint8_t* base); \
-    PPC_FUNC(sub_##addr) { \
-        uint32_t st_before = PPC_LOAD_U32(0x8370DD7C); \
+    REX_EXTERN(sub_##addr) { \
+        uint32_t st_before = REX_LOAD_U32(0x8370DD7C); \
         __imp__sub_##addr(ctx, base); \
-        uint32_t st_after = PPC_LOAD_U32(0x8370DD7C); \
+        uint32_t st_after = REX_LOAD_U32(0x8370DD7C); \
         static int _c = 0; _c++; \
         if (st_before != st_after || _c <= 5) { \
             FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
@@ -299,17 +303,17 @@ extern "C" void __imp__sub_822827B0(PPCContext& ctx, uint8_t* base);
 //   2 = loading phase 2
 //   3 = done → exits loading loop → proceeds to game loop with GL2_Render
 // Force state to 3 after a few frames to bypass the stuck loading.
-PPC_FUNC(sub_822827B0) {
+REX_EXTERN(sub_822827B0) {
     static int _c = 0; _c++;
-    uint32_t state_before = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t state_before = REX_LOAD_U32(0x8370DD7C);
     __imp__sub_822827B0(ctx, base);
-    uint32_t state_after = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t state_after = REX_LOAD_U32(0x8370DD7C);
     if (_c <= 30 || state_before != state_after || (_c % 100 == 0)) {
         // Trace the exact internal computation that should advance state
         uint32_t r31_addr = 0x8370DA78;
-        uint32_t queue_ptr = PPC_LOAD_U32(r31_addr - 196);
-        uint32_t q8 = queue_ptr ? PPC_LOAD_U32(queue_ptr + 8) : 0;
-        uint32_t q12 = queue_ptr ? PPC_LOAD_U32(queue_ptr + 12) : 0;
+        uint32_t queue_ptr = REX_LOAD_U32(r31_addr - 196);
+        uint32_t q8 = queue_ptr ? REX_LOAD_U32(queue_ptr + 8) : 0;
+        uint32_t q12 = queue_ptr ? REX_LOAD_U32(queue_ptr + 12) : 0;
         int32_t diff = (int32_t)(q8 - q12);
         uint32_t clz = (diff == 0) ? 32 : __builtin_clz((uint32_t)diff);
         // PPC rlwinm r11,r11,27,31,31: rotate 32-bit left by 27, mask bit 31 (LSB)
@@ -322,9 +326,9 @@ PPC_FUNC(sub_822827B0) {
     // Log the loading check flags and state machine internals
     if (_c <= 50 || _c % 100 == 0) {
         uint32_t r31_addr = 0x8370DA78;
-        uint32_t load_queue = PPC_LOAD_U32(r31_addr - 196); // [r31-196] = loading queue ptr
-        uint32_t internal_var = PPC_LOAD_U32(r31_addr + 0);  // [r31+0] another state var
-        uint32_t r31_776 = PPC_LOAD_U32(r31_addr + 776);     // [r31+776]
+        uint32_t load_queue = REX_LOAD_U32(r31_addr - 196); // [r31-196] = loading queue ptr
+        uint32_t internal_var = REX_LOAD_U32(r31_addr + 0);  // [r31+0] another state var
+        uint32_t r31_776 = REX_LOAD_U32(r31_addr + 776);     // [r31+776]
         // sub_82282638 checks 4 entries at base 0x832BAAE8, stride 584.
         // (Verified in IDA against recomp: sub_82282638 computes
         //  lis -31956; addi -21784 -> 0x832BAAE8, then reads slot+24/+108/+360
@@ -335,15 +339,15 @@ PPC_FUNC(sub_822827B0) {
         uint32_t base = 0x832BAAE8;
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
-            uint32_t q8 = load_queue ? PPC_LOAD_U32(load_queue + 8) : 0;
-            uint32_t q12 = load_queue ? PPC_LOAD_U32(load_queue + 12) : 0;
+            uint32_t q8 = load_queue ? REX_LOAD_U32(load_queue + 8) : 0;
+            uint32_t q12 = load_queue ? REX_LOAD_U32(load_queue + 12) : 0;
             fprintf(f, "[LoadCheck #%d] queue=0x%08X [+8]=0x%08X [+12]=0x%08X (empty=%d) var0=%u ",
                 _c, load_queue, q8, q12, (q8 == q12), internal_var);
             for (int i = 0; i < 4; i++) {
                 uint32_t entry = base + i * 584;
-                uint8_t b24 = PPC_LOAD_U8(entry + 24);
-                uint8_t b108 = PPC_LOAD_U8(entry + 108);
-                uint8_t b360 = PPC_LOAD_U8(entry + 360);
+                uint8_t b24 = REX_LOAD_U8(entry + 24);
+                uint8_t b108 = REX_LOAD_U8(entry + 108);
+                uint8_t b360 = REX_LOAD_U8(entry + 360);
                 fprintf(f, "e%d[%u,%u,%u] ", i, b24, b108, b360);
             }
             fprintf(f, "\n");
@@ -377,7 +381,7 @@ PPC_FUNC(sub_822827B0) {
     // Loading now completes naturally via KeInitializeSemaphore preservation.
     // No force-bypass needed. Keep a safety net for debugging:
     if (_c >= 10000 && state_after == 1) {
-        PPC_STORE_U32(0x8370DD7C, 3);
+        REX_STORE_U32(0x8370DD7C, 3);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[GameUpdate #%d] FORCED state 1 -> 3 (loading safety timeout)\n", _c); fclose(f); }
     }
@@ -389,13 +393,13 @@ extern "C" void __imp__sub_821FBD10(PPCContext& ctx, uint8_t* base);
 static void gstr(uint8_t* base, uint32_t addr, char* out, int n) {
     int i = 0;
     if (addr >= 0x82000000 && addr < 0x84000000) {
-        for (; i < n - 1; i++) { char ch = (char)PPC_LOAD_U8(addr + i); if (!ch) break; out[i] = ch; }
+        for (; i < n - 1; i++) { char ch = (char)REX_LOAD_U8(addr + i); if (!ch) break; out[i] = ch; }
     }
     out[i] = 0;
 }
 
 extern "C" void __imp__sub_825BFC10(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825BFC10) {
+REX_EXTERN(sub_825BFC10) {
     uint32_t arg = ctx.r3.u32;
     // sub_825BFC10 is a generic table/resource loader: r3 is a filename string
     // when called from sub_82185498 (e.g. "multiplayer_levels.xtbl"). Log the
@@ -417,7 +421,7 @@ PPC_FUNC(sub_825BFC10) {
 // byte_8370DA94 is set ONLY at the very end of sub_82185498; runtime shows it
 // never gets set, so the init hangs partway. These markers bracket where.
 extern "C" void __imp__sub_822A8608(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_822A8608) {        // line 694: "unlockable_interface_script.xtbl"
+REX_EXTERN(sub_822A8608) {        // line 694: "unlockable_interface_script.xtbl"
     static bool once = false;
     char name[64]; gstr(base, ctx.r4.u32, name, sizeof(name));
     if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -425,7 +429,7 @@ PPC_FUNC(sub_822A8608) {        // line 694: "unlockable_interface_script.xtbl"
     __imp__sub_822A8608(ctx, base);
 }
 extern "C" void __imp__sub_821162F0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_821162F0) {        // line 781: "spawn_info_ranks.xtbl"
+REX_EXTERN(sub_821162F0) {        // line 781: "spawn_info_ranks.xtbl"
     static bool once = false;
     char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
     if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -433,7 +437,7 @@ PPC_FUNC(sub_821162F0) {        // line 781: "spawn_info_ranks.xtbl"
     __imp__sub_821162F0(ctx, base);
 }
 extern "C" void __imp__sub_821F4410(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_821F4410) {        // line 927: "cheats.xtbl"
+REX_EXTERN(sub_821F4410) {        // line 927: "cheats.xtbl"
     static bool once = false;
     char name[64]; gstr(base, ctx.r7.u32, name, sizeof(name));
     if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -445,7 +449,7 @@ PPC_FUNC(sub_821F4410) {        // line 927: "cheats.xtbl"
 // streaming IO is the prime suspect for the init hang. Log ENTER/RETURN per
 // filename: an ENTER with no matching RETURN pinpoints the hanging load.
 extern "C" void __imp__sub_82645660(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82645660) {
+REX_EXTERN(sub_82645660) {
     char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
     static int pc = 0;
     int myc = (name[0] ? ++pc : 0);
@@ -462,7 +466,7 @@ PPC_FUNC(sub_82645660) {
 
 // ---- finer brackets for sub_82185498 lines 467..694 (peg loads OK; hang here) ----
 extern "C" void __imp__sub_826F92F8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_826F92F8) {        // ".anim" loader (called many times during init)
+REX_EXTERN(sub_826F92F8) {        // ".anim" loader (called many times during init)
     char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
     static int dc = 0; int myc = ++dc;
     // The anim-preload routine ends by re-loading the watermelon anims; mark
@@ -489,7 +493,7 @@ std::atomic<int> g_after_anims{0};
 // RETURN is the hanging call. Covers sub_82185498 lines 522..527.
 #define POSTANIM_MARK(fn, lineno)                                                      \
     extern "C" void __imp__##fn(PPCContext& ctx, uint8_t* base);                       \
-    PPC_FUNC(fn) {                                                                     \
+    REX_EXTERN(fn) {                                                                     \
         static bool logged = false;                                                    \
         bool go = g_after_anims.load() && !logged;                                     \
         if (go) { logged = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");      \
@@ -539,7 +543,7 @@ POSTANIM_MARK(sub_8267AAA0, hk_354_inner)
 static std::atomic<int> g_hkalloc_log{0};
 #define ALLOCMARK(fn) \
     extern "C" void __imp__##fn(PPCContext& ctx, uint8_t* base); \
-    PPC_FUNC(fn) { \
+    REX_EXTERN(fn) { \
         bool go = g_after_anims.load(); int myc = 0; \
         if (go && (myc = g_hkalloc_log.fetch_add(1)) < 6000) { \
             FILE* f = fopen("saintsrow_heartbeat.log", "a"); \
@@ -559,7 +563,7 @@ ALLOCMARK(sub_826C19A8)
 // here with a huge CTR -> a memcpy with a garbage/huge size. Log only absurd sizes
 // (the bug) plus the caller (LR) so we find the bad call site. Cheap: 1 compare/call.
 extern "C" void __imp__sub_82702D20(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82702D20) {
+REX_EXTERN(sub_82702D20) {
     uint32_t n = ctx.r5.u32;
     if (n > 0x01000000) {  // >16MB memcpy is a size underflow (e.g. erase-from-empty
         // array: count-4 wraps to 0xFFFFFFFC). Largest real init copy is ~256KB.
@@ -585,17 +589,17 @@ PPC_FUNC(sub_82702D20) {
 // Custom hook for sub_826C98D8: log entry args — r6 is the Havok build version;
 // if r6 != 30300 (0x765C) the mismatch error path (line 194, hkWorld.cpp:2248) runs.
 extern "C" void __imp__sub_826C98D8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_826C98D8) {
+REX_EXTERN(sub_826C98D8) {
     static bool once = false;
     if (g_after_anims.load() && !once) {
         once = true;
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         // Resolve the Havok allocator (dword_8283BE44) and its vtable methods so
         // we can decompile the one that hangs (vtable+16 used at lines 358/363/368).
-        uint32_t alloc_obj = PPC_LOAD_U32(0x8283BE44);
-        uint32_t vt = alloc_obj ? PPC_LOAD_U32(alloc_obj) : 0;
-        uint32_t m16 = vt ? PPC_LOAD_U32(vt + 16) : 0;
-        uint32_t m24 = vt ? PPC_LOAD_U32(vt + 24) : 0;
+        uint32_t alloc_obj = REX_LOAD_U32(0x8283BE44);
+        uint32_t vt = alloc_obj ? REX_LOAD_U32(alloc_obj) : 0;
+        uint32_t m16 = vt ? REX_LOAD_U32(vt + 16) : 0;
+        uint32_t m24 = vt ? REX_LOAD_U32(vt + 24) : 0;
         if (f) { fprintf(f, "[HavokInit] sub_826C98D8 ENTER r3=0x%08X r5=0x%08X(ver) r6=0x%08X | alloc=0x%08X vt=0x%08X vt+16=0x%08X vt+24=0x%08X\n",
             ctx.r3.u32, ctx.r5.u32, ctx.r6.u32, alloc_obj, vt, m16, m24); fclose(f); }
     }
@@ -606,26 +610,26 @@ PPC_FUNC(sub_826C98D8) {
     }
 }
 extern "C" void __imp__sub_8221CAC8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8221CAC8) {        // line 532: "preload.vpp" (only if byte_8370D671)
+REX_EXTERN(sub_8221CAC8) {        // line 532: "preload.vpp" (only if byte_8370D671)
     static bool once = false;
     char name[64]; gstr(base, ctx.r3.u32, name, sizeof(name));
     if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[InitMark E1] sub_8221CAC8 vpp=\"%s\" D671=%u (line~532)\n", name, PPC_LOAD_U8(0x8370D671)); fclose(f); } }
+        if (f) { fprintf(f, "[InitMark E1] sub_8221CAC8 vpp=\"%s\" D671=%u (line~532)\n", name, REX_LOAD_U8(0x8370D671)); fclose(f); } }
     __imp__sub_8221CAC8(ctx, base);
     { FILE* f = fopen("saintsrow_heartbeat.log", "a");
       if (f) { fprintf(f, "[InitMark E1-ret] sub_8221CAC8 vpp=\"%s\" RETURNED\n", name); fclose(f); } }
 }
 extern "C" void __imp__sub_8221C6E0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8221C6E0) {        // line 536: else-branch package load
+REX_EXTERN(sub_8221C6E0) {        // line 536: else-branch package load
     static bool once = false;
     if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[InitMark E2] sub_8221C6E0 r3=0x%08X D671=%u (line~536)\n", ctx.r3.u32, PPC_LOAD_U8(0x8370D671)); fclose(f); } }
+        if (f) { fprintf(f, "[InitMark E2] sub_8221C6E0 r3=0x%08X D671=%u (line~536)\n", ctx.r3.u32, REX_LOAD_U8(0x8370D671)); fclose(f); } }
     __imp__sub_8221C6E0(ctx, base);
     { static bool r=false; if(!r){r=true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
       if (f) { fprintf(f, "[InitMark E2-ret] sub_8221C6E0 RETURNED r3=0x%08X\n", ctx.r3.u32); fclose(f); } } }
 }
 extern "C" void __imp__sub_825CD1F8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825CD1F8) {        // line 644: 960x960 render target create
+REX_EXTERN(sub_825CD1F8) {        // line 644: 960x960 render target create
     static bool once = false;
     if (!once) { once = true; FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[InitMark F] sub_825CD1F8(%u,%u,..) (line~644)\n", ctx.r3.u32, ctx.r4.u32); fclose(f); } }
@@ -633,7 +637,7 @@ PPC_FUNC(sub_825CD1F8) {        // line 644: 960x960 render target create
 }
 // Hook sub_826FE350 (comparison function) to see what's being compared
 extern "C" void __imp__sub_826FE350(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_826FE350) {
+REX_EXTERN(sub_826FE350) {
     uint32_t data = ctx.r3.u32;
     uint32_t filter = ctx.r4.u32;
     __imp__sub_826FE350(ctx, base);
@@ -648,14 +652,14 @@ PPC_FUNC(sub_826FE350) {
 
 // Hook sub_82648648 - log ALL null returns and force first item
 extern "C" void __imp__sub_82648648(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82648648) {
+REX_EXTERN(sub_82648648) {
     uint32_t in_r3 = ctx.r3.u32;
     uint32_t in_r4 = ctx.r4.u32;
     __imp__sub_82648648(ctx, base);
     static int c = 0; c++;
     if (ctx.r3.u32 == 0) {
         // Returned null - force first item from queue
-        uint32_t first_item = in_r3 ? PPC_LOAD_U32(in_r3 + 8) : 0;
+        uint32_t first_item = in_r3 ? REX_LOAD_U32(in_r3 + 8) : 0;
         static int null_c = 0;
         if (++null_c <= 10) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -667,12 +671,12 @@ PPC_FUNC(sub_82648648) {
         }
     }
 }
-PPC_FUNC(sub_821FBD10) {
+REX_EXTERN(sub_821FBD10) {
     // Check the Bink data address used for queue lookup
     uint32_t bink_data = 0x8278CD08;
-    uint32_t val0 = PPC_LOAD_U32(bink_data);
-    uint32_t val4 = PPC_LOAD_U32(bink_data + 4);
-    uint32_t val8 = PPC_LOAD_U32(bink_data + 8);
+    uint32_t val0 = REX_LOAD_U32(bink_data);
+    uint32_t val4 = REX_LOAD_U32(bink_data + 4);
+    uint32_t val8 = REX_LOAD_U32(bink_data + 8);
     static int c = 0;
     if (++c <= 3) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -690,12 +694,12 @@ TRACE_STATE("RenderB", 8263DE08)
 TRACE_STATE("RenderC", 8263DD80)
 // GL2_Render with detailed state check
 extern "C" void __imp__sub_8262FFE0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8262FFE0) {
+REX_EXTERN(sub_8262FFE0) {
     // [0x8372033C] = skip_flag at [r28+32] where r28=0x8372031C
     // If non-zero, GL2_Render returns immediately (no rendering)
-    uint32_t skip_flag = PPC_LOAD_U32(0x8372033C);
-    uint32_t render_skip = PPC_LOAD_U32(0x83720340);
-    uint32_t frame_count = PPC_LOAD_U32(0x83720320 + 800); // frame counter at [r28+800]
+    uint32_t skip_flag = REX_LOAD_U32(0x8372033C);
+    uint32_t render_skip = REX_LOAD_U32(0x83720340);
+    uint32_t frame_count = REX_LOAD_U32(0x83720320 + 800); // frame counter at [r28+800]
     static int _c = 0; _c++;
     static int skip_count = 0;
     static int render_count = 0;
@@ -713,15 +717,15 @@ PPC_FUNC(sub_8262FFE0) {
     // When the pointer becomes valid, let the game call through to enable
     // world loading/physics system updates.
     {
-        uint32_t fn = PPC_LOAD_U32(0x8370F248);
+        uint32_t fn = REX_LOAD_U32(0x8370F248);
         if (fn < 0x82000000 || fn >= 0x83000000) {
-            PPC_STORE_U8(0x8370E9DF, 0);
-            PPC_STORE_U8(0x8370E9F6, 0);
+            REX_STORE_U8(0x8370E9DF, 0);
+            REX_STORE_U8(0x8370E9F6, 0);
         }
     }
 
     // Check the render gate at [0x83710340] - if non-zero, sub_82633898 is skipped
-    uint32_t render_gate = PPC_LOAD_U32(0x83710340);
+    uint32_t render_gate = REX_LOAD_U32(0x83710340);
     static int rg_log = 0;
     if (++rg_log <= 5 || rg_log % 500 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -733,34 +737,35 @@ PPC_FUNC(sub_8262FFE0) {
     // Force render-complete flags every frame so VdSwap fires
     {
         uint32_t r31_val = 0x40001E00;
-        PPC_STORE_U32(r31_val + 19980, 0);
-        PPC_STORE_U8(r31_val + 20424, PPC_LOAD_U8(r31_val + 20424) | 0x8);
-        PPC_STORE_U8(r31_val + 10809, PPC_LOAD_U8(r31_val + 10809) | 0x2);
-        if (PPC_LOAD_U32(r31_val + 20080) == 0)
-            PPC_STORE_U32(r31_val + 20080, 1);
+        REX_STORE_U32(r31_val + 19980, 0);
+        REX_STORE_U8(r31_val + 20424, REX_LOAD_U8(r31_val + 20424) | 0x8);
+        REX_STORE_U8(r31_val + 10809, REX_LOAD_U8(r31_val + 10809) | 0x2);
+        if (REX_LOAD_U32(r31_val + 20080) == 0)
+            REX_STORE_U32(r31_val + 20080, 1);
     }
 
     // Present every frame with atomic guard.
     // Restore fetch constants before IssueSwap for correct format interpretation.
-    if (PPC_LOAD_U32(0x8370DD7C) >= 3) {
+    if (REX_LOAD_U32(0x8370DD7C) >= 3) {
         static std::atomic<bool> swap_pending{false};
         if (!swap_pending.exchange(true)) {
-            auto* ks2 = REX_KERNEL_STATE();
-            auto* gs2 = static_cast<rex::graphics::GraphicsSystem*>(ks2->emulator()->graphics_system());
-            auto* cp2 = gs2->command_processor();
             // Clear tiled bit (bit 31 of dword_0) - the D3D12 framebuffer
             // is linear, not Xenos-tiled. With tiled=1, the texture cache
             // applies detiling to linear data, causing crosshatch artifacts.
             // Linear (untiled) with ZYX1 swizzle for correct channel order
-            uint32_t ft[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
-                              0x00001414, 0x00000000, 0x00000200};
-            uint32_t fb = 0x09258000;
-            cp2->CallInThread([cp2, fb, ft]() {
-                cp2->InvalidateGpuMemory();
-                cp2->RestoreRegisters(0x4800, ft, 6, true);
-                cp2->IssueSwap(fb, 1280, 720);
-                swap_pending.store(false);
-            });
+            static const uint32_t ft[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
+                                           0x00001414, 0x00000000, 0x00000200};
+            for (uint32_t i = 0; i < 6; i++)
+                REX_MM_STORE_U32(REX_GPU_REG(0x4800 + i), ft[i]);
+            // ponytail: presentation now rides the ring buffer. SDK 0.10 moved
+            // the GPU into the rexgpu-xenos plugin, which exports only
+            // rex_gpu_create; CommandProcessor::IssueSwap / CallInThread /
+            // InvalidateGpuMemory are no longer reachable from the host, so the
+            // old "force a swap every GL2_Render" hack is gone. The kick hook
+            // (sub_825D3580) advances CP_RB_WPTR through GPU MMIO, which is the
+            // hardware path VdSwap's swap packet travels. If frames stall again,
+            // add a swap packet to the ring rather than reaching into the CP.
+            swap_pending.store(false);
         }
 
         // Sample framebuffer pixels for color diagnosis
@@ -799,7 +804,7 @@ TRACE_CALL("BinkClean", 821FB070)
 TRACE_CALL("LoadStart", 821FB318)
 // ContentLoad with return value logging
 extern "C" void __imp__sub_82107638(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82107638) {
+REX_EXTERN(sub_82107638) {
     __imp__sub_82107638(ctx, base);
     static int c = 0; c++;
     if (c <= 5) {
@@ -822,7 +827,7 @@ TRACE_CALL("GL2_Func3", 8220FD60)
 // GL2_Render hooked above with skip_flag check
 TRACE_CALL("GL2_Timer", 82717EC8)
 // sub_8234C1C0 = physics update - crashes without proper world data
-PPC_FUNC(sub_8234C1C0) {
+REX_EXTERN(sub_8234C1C0) {
     static int c = 0;
     if (++c <= 3) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -838,19 +843,19 @@ TRACE_CALL("ThreadWrap", 82716078)
 // Previously stubbed because it blocked on a critical section. Now let it run
 // to allow loading callbacks to fire and update viewport loading flags.
 extern "C" void __imp__sub_82604B00(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82604B00) {
+REX_EXTERN(sub_82604B00) {
     static int c = 0;
     c++;
     uint32_t arg = ctx.r3.u32;
-    uint32_t cb_ptr = PPC_LOAD_U32(0x837102B4);
+    uint32_t cb_ptr = REX_LOAD_U32(0x837102B4);
     // Log the function table that RunCallbacks scans
     // lis(-32134) = 0x827A0000, +0x1F20 = 0x827A1F20
     // Scan from 0x827A1F24 to 0x827A1F28 for non-null function pointers
-    uint32_t ft0 = PPC_LOAD_U32(0x827A1F20);
-    uint32_t ft1 = PPC_LOAD_U32(0x827A1F24);
-    uint32_t ft2 = PPC_LOAD_U32(0x827A1F28);
-    uint32_t cb_vt = cb_ptr ? PPC_LOAD_U32(cb_ptr) : 0;
-    uint32_t cb_fn = cb_vt ? PPC_LOAD_U32(cb_vt + 4) : 0;
+    uint32_t ft0 = REX_LOAD_U32(0x827A1F20);
+    uint32_t ft1 = REX_LOAD_U32(0x827A1F24);
+    uint32_t ft2 = REX_LOAD_U32(0x827A1F28);
+    uint32_t cb_vt = cb_ptr ? REX_LOAD_U32(cb_ptr) : 0;
+    uint32_t cb_fn = cb_vt ? REX_LOAD_U32(cb_vt + 4) : 0;
     if (c <= 10 || (c % 200 == 0)) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
@@ -864,7 +869,7 @@ PPC_FUNC(sub_82604B00) {
 
 // sub_82604C10 blocks on a critical section after main loop exits.
 // Stub it to return 0 to unblock the game thread.
-PPC_FUNC(sub_82604C10) {
+REX_EXTERN(sub_82604C10) {
     static int c = 0;
     if (++c <= 3) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -877,7 +882,7 @@ TRACE_CALL("WaitThr", 82716038)
 // sub_82185498 (PostLoop5) - main game loop containing GL2_Render.
 // Runs for real now. Previously crashed from bad vtable dispatches.
 extern "C" void __imp__sub_82185498(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82185498) {
+REX_EXTERN(sub_82185498) {
     static int c = 0;
     c++;
     if (c <= 3) { FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -888,16 +893,16 @@ PPC_FUNC(sub_82185498) {
     // that calls through [0x8370F248]. Only clear the flags if the function
     // pointer is null/invalid - let the call through if it points to valid code.
     {
-        uint32_t fn_ptr = PPC_LOAD_U32(0x8370F248);
+        uint32_t fn_ptr = REX_LOAD_U32(0x8370F248);
         bool valid = (fn_ptr >= 0x82000000 && fn_ptr < 0x83000000);
         static int flog = 0;
         if (++flog <= 10 || flog % 500 == 0) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
             if (f) { fprintf(f, "[FnGate #%d] [0x8370F248]=0x%08X flags=[%u,%u] valid=%d\n",
-                flog, fn_ptr, PPC_LOAD_U8(0x8370E9DF), PPC_LOAD_U8(0x8370E9F6), valid); fclose(f); }
+                flog, fn_ptr, REX_LOAD_U8(0x8370E9DF), REX_LOAD_U8(0x8370E9F6), valid); fclose(f); }
         }
         if (!valid) {
-            PPC_STORE_U8(0x8370E9DF, 0);
+            REX_STORE_U8(0x8370E9DF, 0);
         }
     }
 
@@ -910,7 +915,7 @@ TRACE_CALL("FrameRender", 82648D80)
 
 // Instead of hooking sub_82186F08, override it completely to control the loop
 // This lets us instrument the loop condition check
-PPC_FUNC(sub_82186F08) {
+REX_EXTERN(sub_82186F08) {
     // Call the real function but intercept the loop
     __imp__sub_82186F08(ctx, base);
     FILE* hf = fopen("saintsrow_heartbeat.log", "a");
@@ -935,14 +940,14 @@ static std::unordered_map<uint32_t, uint32_t> g_cs_holder;  // cs_addr -> host t
 static inline uint32_t host_tid() {
     return (uint32_t)std::hash<std::thread::id>{}(std::this_thread::get_id());
 }
-PPC_FUNC(sub_82788704) {  // RtlEnterCriticalSection
+REX_EXTERN(sub_82788704) {  // RtlEnterCriticalSection
     uint32_t cs_addr = ctx.r3.u32;
     uint32_t me = host_tid();
     uint32_t holder = 0;
     { std::lock_guard<std::mutex> g(g_cs_mtx); auto it = g_cs_holder.find(cs_addr); if (it != g_cs_holder.end()) holder = it->second; }
     bool contended = (holder != 0);
     if (contended) {
-        uint32_t owner_guest = PPC_LOAD_U32(cs_addr + 12);
+        uint32_t owner_guest = REX_LOAD_U32(cs_addr + 12);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[CS-WAIT] cs=0x%08X me=0x%08X holder=0x%08X same=%d ownerGuest=0x%08X\n",
             cs_addr, me, holder, holder == me, owner_guest); fclose(f); }
@@ -955,7 +960,7 @@ PPC_FUNC(sub_82788704) {  // RtlEnterCriticalSection
     }
 }
 
-PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
+REX_EXTERN(sub_82788714) {  // RtlLeaveCriticalSection
     uint32_t cs_addr = ctx.r3.u32;
     { std::lock_guard<std::mutex> g(g_cs_mtx); g_cs_holder.erase(cs_addr); }
     __imp__RtlLeaveCriticalSection(ctx, base);
@@ -967,7 +972,7 @@ PPC_FUNC(sub_82788714) {  // RtlLeaveCriticalSection
 // a short delay to let the game proceed.
 // sub_82716020 - force loading complete flag after a few calls
 extern "C" void __imp__sub_82716020(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82716020) {
+REX_EXTERN(sub_82716020) {
     static int call_count = 0;
     call_count++;
     __imp__sub_82716020(ctx, base);
@@ -979,15 +984,15 @@ PPC_FUNC(sub_82716020) {
     //   -> byte_8370DA95=1 -> loader thread sub_82186AF0 sets byte_8370D6C9=1
     //   -> main spin loop exits into real game loop sub_82186C10.
     if ((call_count <= 20) || (call_count % 240 == 0)) {
-        uint32_t fbits = PPC_LOAD_U32(0x8370D1A4);
+        uint32_t fbits = REX_LOAD_U32(0x8370D1A4);
         float fade; memcpy(&fade, &fbits, 4);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
             fprintf(f, "[LoadChain #%d] r3=%d DA94(ready)=%u fade[D1A4]=%.4f DA95(done)=%u D6C9(complete)=%u DA95b=%u\n",
                 call_count, ctx.r3.s32,
-                PPC_LOAD_U8(0x8370DA94), fade,
-                PPC_LOAD_U8(0x8370DA95), PPC_LOAD_U8(0x8370D6C9),
-                PPC_LOAD_U8(0x8370DA95));
+                REX_LOAD_U8(0x8370DA94), fade,
+                REX_LOAD_U8(0x8370DA95), REX_LOAD_U8(0x8370D6C9),
+                REX_LOAD_U8(0x8370DA95));
             fclose(f);
         }
     }
@@ -997,7 +1002,7 @@ PPC_FUNC(sub_82716020) {
     // (front-end init) complete so byte_8370DA94 -> fade -> byte_8370D6C9
     // happens naturally.
     if (call_count == 5) {
-        PPC_STORE_U8(0x8370D6C9, 1);
+        REX_STORE_U8(0x8370D6C9, 1);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[FORCE-FLAG] Set at 0x8370D6C9 after %d calls\n", call_count); fclose(f); }
     }
@@ -1007,12 +1012,12 @@ PPC_FUNC(sub_82716020) {
 // After the game writes its structure to the secondary buffer,
 // extract the indirect buffer addresses and feed them to the CP.
 extern "C" void __imp__sub_825D3580(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825D3580) {
+REX_EXTERN(sub_825D3580) {
     uint32_t r31 = ctx.r3.u32;
     uint32_t r4 = ctx.r4.u32;
     static int kick_total = 0;
     kick_total++;
-    uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t game_state = REX_LOAD_U32(0x8370DD7C);
     if (kick_total <= 10 || (game_state >= 3 && kick_total <= 20) || kick_total % 500 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[Kick-Total #%d] state=%u r3=0x%08X r4=0x%08X\n",
@@ -1026,11 +1031,9 @@ PPC_FUNC(sub_825D3580) {
     // Create an INDIRECT_BUFFER_PFD covering ALL data from the last position
     // to the current position (including the 10 kick dwords).
     auto* ks = REX_KERNEL_STATE();
-    auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
-    auto* cp = gs->command_processor();
 
-    uint32_t rb_prim = PPC_LOAD_U32(r31 + 13436);
-    uint32_t rb_sec = PPC_LOAD_U32(r31 + 13440);
+    uint32_t rb_prim = REX_LOAD_U32(r31 + 13436);
+    uint32_t rb_sec = REX_LOAD_U32(r31 + 13440);
 
     // Track where we last created an indirect buffer reference
     static uint32_t last_ib_end = 0;
@@ -1095,13 +1098,13 @@ PPC_FUNC(sub_825D3580) {
                 // The data starts with zero padding, then has valid PM4.
                 // Skip leading zeros to find the PM4 start.
                 uint32_t pm4_start = 0;
-                while (pm4_start < scan_len && PPC_LOAD_U32(scan_start + pm4_start * 4) == 0) {
+                while (pm4_start < scan_len && REX_LOAD_U32(scan_start + pm4_start * 4) == 0) {
                     pm4_start++;
                 }
                 // Scan for contiguous valid PM4 packets from pm4_start
                 scan_pos = pm4_start;
                 while (scan_pos < scan_len) {
-                    uint32_t hdr = PPC_LOAD_U32(scan_start + scan_pos * 4);
+                    uint32_t hdr = REX_LOAD_U32(scan_start + scan_pos * 4);
                     if (hdr == 0) {
                         // Stop at zero - the CP can't skip zeros and would
                         // misinterpret them as Type0 packets, causing
@@ -1155,7 +1158,7 @@ PPC_FUNC(sub_825D3580) {
                                 uint32_t dp = 0;
                                 int pkt_logged = 0;
                                 while (dp < pm4_dwords) {
-                                    uint32_t h = PPC_LOAD_U32(pm4_addr + dp * 4);
+                                    uint32_t h = REX_LOAD_U32(pm4_addr + dp * 4);
                                     if (h == 0) { dp++; continue; }
                                     uint32_t pt = (h >> 30) & 3;
                                     if (pt == 0) {
@@ -1170,7 +1173,7 @@ PPC_FUNC(sub_825D3580) {
                                         if (interesting) {
                                             fprintf(rf, "  [%u] Type0 reg=0x%04X cnt=%u", dp, reg, cnt);
                                             for (uint32_t j = 0; j < cnt && j < 8; j++)
-                                                fprintf(rf, " %08X", PPC_LOAD_U32(pm4_addr + (dp+1+j)*4));
+                                                fprintf(rf, " %08X", REX_LOAD_U32(pm4_addr + (dp+1+j)*4));
                                             fprintf(rf, "\n");
                                             pkt_logged++;
                                         }
@@ -1193,7 +1196,7 @@ PPC_FUNC(sub_825D3580) {
                 }
             }
 
-            cp->UpdateWritePointer(prim_write_pos);
+            REX_MM_STORE_U32(REX_GPU_REG(0x01C5), prim_write_pos);  // CP_RB_WPTR
 
 
             static int ib_c = 0;
@@ -1205,7 +1208,7 @@ PPC_FUNC(sub_825D3580) {
                     // Dump first dwords of the rendering range
                     if (last_ib_end > 0 && last_ib_end < r4) {
                         fprintf(f, "  render[0..7]: ");
-                        for (int i = 0; i < 8; i++) fprintf(f, "%08X ", PPC_LOAD_U32(last_ib_end + i*4));
+                        for (int i = 0; i < 8; i++) fprintf(f, "%08X ", REX_LOAD_U32(last_ib_end + i*4));
                         fprintf(f, "\n");
                     }
                     fclose(f);
@@ -1219,7 +1222,7 @@ PPC_FUNC(sub_825D3580) {
     static int kick_trace = 0;
     if (++kick_trace <= 5) {
         uint32_t d[10];
-        for (int i = 0; i < 10; i++) d[i] = PPC_LOAD_U32(r4 + i*4);
+        for (int i = 0; i < 10; i++) d[i] = REX_LOAD_U32(r4 + i*4);
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) {
             fprintf(f, "[Kick #%d] @0x%08X: %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X\n",
@@ -1231,34 +1234,32 @@ PPC_FUNC(sub_825D3580) {
 
 // Hook GPU ring buffer init function to trace why VdInitializeRingBuffer is never called
 extern "C" void __imp__sub_825D3DA8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825D3DA8) {
+REX_EXTERN(sub_825D3DA8) {
     uint32_t r31 = ctx.r3.u32; // first arg = render state
     uint32_t r26_arg = ctx.r4.u32; // second arg = ring buffer config (r26 inside function)
-    uint32_t rb_10780 = PPC_LOAD_U32(r31 + 10780);
-    uint32_t rb_13504 = PPC_LOAD_U32(r31 + 13504);
+    uint32_t rb_10780 = REX_LOAD_U32(r31 + 10780);
+    uint32_t rb_13504 = REX_LOAD_U32(r31 + 13504);
     // Check what r26 (r4) points to - this controls ring buffer allocation
-    uint32_t r26_v4 = r26_arg ? PPC_LOAD_U32(r26_arg + 4) : 0;
-    uint32_t r26_v8 = r26_arg ? PPC_LOAD_U32(r26_arg + 8) : 0;
+    uint32_t r26_v4 = r26_arg ? REX_LOAD_U32(r26_arg + 4) : 0;
+    uint32_t r26_v8 = r26_arg ? REX_LOAD_U32(r26_arg + 8) : 0;
     FILE* f = fopen("saintsrow_heartbeat.log", "a");
     if (f) { fprintf(f, "[RB-Init] ENTER r3=0x%08X r4=0x%08X [10780]=%u [13504]=0x%08X r4[4]=0x%08X r4[8]=0x%08X\n",
         r31, r26_arg, rb_10780, rb_13504, r26_v4, r26_v8); fclose(f); }
     __imp__sub_825D3DA8(ctx, base);
     uint32_t ret = ctx.r3.u32;
-    uint32_t rb_10772 = PPC_LOAD_U32(r31 + 10772);
-    uint32_t rb_10768 = PPC_LOAD_U32(r31 + 10768);
-    uint32_t rb_13436 = PPC_LOAD_U32(r31 + 13436);
-    uint32_t rb_13440 = PPC_LOAD_U32(r31 + 13440);
+    uint32_t rb_10772 = REX_LOAD_U32(r31 + 10772);
+    uint32_t rb_10768 = REX_LOAD_U32(r31 + 10768);
+    uint32_t rb_13436 = REX_LOAD_U32(r31 + 13436);
+    uint32_t rb_13440 = REX_LOAD_U32(r31 + 13440);
     f = fopen("saintsrow_heartbeat.log", "a");
     if (f) { fprintf(f, "[RB-Init] EXIT ret=%u [10780]=%u [10772]=0x%08X [10768]=0x%08X [13436]=0x%08X [13440]=0x%08X\n",
-        ret, PPC_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
+        ret, REX_LOAD_U32(r31 + 10780), rb_10772, rb_10768, rb_13436, rb_13440); fclose(f); }
 
     // Use the PRIMARY ring buffer. It starts with 31 dwords of valid PM4
     // (ME_INIT + 4 INDIRECT_BUFFER_PFD). We'll append more INDIRECT_BUFFER
     // references as the kick function produces them.
     if (rb_13436 != 0) {
         auto* ks = REX_KERNEL_STATE();
-        auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
-        auto* cp = gs->command_processor();
 
         uint32_t rb_phys = ks->memory()->GetPhysicalAddress(rb_13436);
         if (rb_phys != UINT32_MAX) {
@@ -1277,13 +1278,13 @@ PPC_FUNC(sub_825D3DA8) {
                 memset(rb_phys_host + 31 * 4, 0, 32768 - 31 * 4);
             }
 
-            cp->InitializeRingBuffer(rb_phys, size_log2);
+            ks->emulator()->graphics_system()->InitializeRingBuffer(rb_phys, size_log2);
 
             // Enable read pointer writeback
             if (rb_10768) {
                 uint32_t rptr_wb = ks->memory()->GetPhysicalAddress(rb_10768);
                 if (rptr_wb != UINT32_MAX) {
-                    cp->EnableReadPointerWriteBack(rptr_wb, 6);
+                    ks->emulator()->graphics_system()->EnableReadPointerWriteBack(rptr_wb, 6);
                 }
             }
 
@@ -1296,7 +1297,7 @@ PPC_FUNC(sub_825D3DA8) {
 
 // VdSwap override - intercept the actual SDK import symbol
 // The recompiled code calls __imp__VdSwap directly, NOT through sub_827889E4
-// Use PPC_FUNC_IMPL to define the extern "C" symbol that the recompiled code calls
+// Use REX_EXTERN to define the extern "C" symbol that the recompiled code calls
 // The linker's /force:multiple flag lets us override the SDK's definition
 //
 // VdSwap_entry takes 10 args via HostToGuestFunction:
@@ -1308,11 +1309,11 @@ PPC_FUNC(sub_825D3DA8) {
 // we'll call VdSwap_entry directly via HostToGuestFunction.
 #include <rex/ppc/function.h>
 namespace rex { namespace kernel { namespace xboxkrnl {
-    extern void VdSwap_entry(ppc_pvoid_t, ppc_pvoid_t, ppc_pvoid_t, ppc_pvoid_t,
-        ppc_pvoid_t, ppc_pu32_t, ppc_pu32_t, ppc_pu32_t, ppc_pu32_t, ppc_pu32_t);
+    extern void VdSwap_entry(mapped_void, mapped_void, mapped_void, mapped_void,
+        mapped_void, mapped_u32, mapped_u32, mapped_u32, mapped_u32, mapped_u32);
 }}}
 
-PPC_FUNC_IMPL(__imp__VdSwap) {
+REX_EXTERN(__imp__VdSwap) {
     static int c = 0;
     if (++c <= 20) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1321,15 +1322,15 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                 c, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32, ctx.r9.u32, ctx.r10.u32);
             // Dump fetch constant at r4 (6 dwords)
             if (ctx.r4.u32) {
-                uint32_t f0 = PPC_LOAD_U32(ctx.r4.u32), f1 = PPC_LOAD_U32(ctx.r4.u32+4);
-                uint32_t f2 = PPC_LOAD_U32(ctx.r4.u32+8), f3 = PPC_LOAD_U32(ctx.r4.u32+12);
+                uint32_t f0 = REX_LOAD_U32(ctx.r4.u32), f1 = REX_LOAD_U32(ctx.r4.u32+4);
+                uint32_t f2 = REX_LOAD_U32(ctx.r4.u32+8), f3 = REX_LOAD_U32(ctx.r4.u32+12);
                 fprintf(f, "  fetch[0..3]=%08X %08X %08X %08X\n", f0, f1, f2, f3);
                 // base_address is in fetch dword 0 bits [31:12] (or similar)
                 fprintf(f, "  fetch.base_addr_raw = 0x%08X (<<12 = 0x%08X)\n", f0 >> 12, (f0 >> 12) << 12);
             }
             // Dump frontbuffer ptr at r8
             if (ctx.r8.u32) {
-                fprintf(f, "  *frontbuffer_ptr = 0x%08X\n", PPC_LOAD_U32(ctx.r8.u32));
+                fprintf(f, "  *frontbuffer_ptr = 0x%08X\n", REX_LOAD_U32(ctx.r8.u32));
             }
             fclose(f);
         }
@@ -1338,7 +1339,7 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
     uint32_t buf_addr = ctx.r3.u32;
 
     // Call the real SDK implementation
-    rex::HostToGuestFunction<rex::kernel::xboxkrnl::VdSwap_entry>(ctx, base);
+    rex::ppc::HostToGuestFunction<rex::kernel::xboxkrnl::VdSwap_entry>(ctx, base);
 
     // After VdSwap writes packets to ring buffer, we need to kick the
     // command processor. The game's ring buffer init (sub_825DAB58) is never
@@ -1347,33 +1348,31 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
     // 2. Update the write pointer after each VdSwap
     {
         auto* ks = REX_KERNEL_STATE();
-        auto* gs = static_cast<rex::graphics::GraphicsSystem*>(ks->emulator()->graphics_system());
-        auto* cp = gs->command_processor();
 
         // Bypass the ring buffer entirely and call IssueSwap directly.
         // VdSwap wrote the swap packet with:
         //   frontbuffer physical address = 0x09258000 (from buf[9])
         //   width = 1280, height = 720 (from buf[10], buf[11])
         // Also write the fetch constant to GPU register file first.
-        uint32_t fb_phys = PPC_LOAD_U32(buf_addr + 36); // buf[9] = frontbuffer phys
-        uint32_t width = PPC_LOAD_U32(buf_addr + 40);   // buf[10]
-        uint32_t height = PPC_LOAD_U32(buf_addr + 44);  // buf[11]
+        uint32_t fb_phys = REX_LOAD_U32(buf_addr + 36); // buf[9] = frontbuffer phys
+        uint32_t width = REX_LOAD_U32(buf_addr + 40);   // buf[10]
+        uint32_t height = REX_LOAD_U32(buf_addr + 44);  // buf[11]
 
         // Read the fetch constant data (6 dwords after the Type0 header)
         uint32_t fetch[6];
         for (int i = 0; i < 6; i++) {
-            fetch[i] = PPC_LOAD_U32(buf_addr + 4 + i*4);
+            fetch[i] = REX_LOAD_U32(buf_addr + 4 + i*4);
         }
 
         // Trace flush function gate conditions to understand what's blocking
         {
             uint32_t rs = 0x40001E00;
-            uint8_t v10808 = PPC_LOAD_U8(rs + 10808);
-            uint8_t v10809 = PPC_LOAD_U8(rs + 10809);
-            uint32_t v12960 = PPC_LOAD_U32(rs + 12960);
-            uint32_t v13160 = PPC_LOAD_U32(rs + 13160);
-            uint32_t v13528 = PPC_LOAD_U32(rs + 13528);
-            uint32_t v40 = PPC_LOAD_U32(rs + 40);
+            uint8_t v10808 = REX_LOAD_U8(rs + 10808);
+            uint8_t v10809 = REX_LOAD_U8(rs + 10809);
+            uint32_t v12960 = REX_LOAD_U32(rs + 12960);
+            uint32_t v13160 = REX_LOAD_U32(rs + 13160);
+            uint32_t v13528 = REX_LOAD_U32(rs + 13528);
+            uint32_t v40 = REX_LOAD_U32(rs + 40);
             static int gate_c = 0;
             if (++gate_c <= 5) {
                 FILE* gf = fopen("saintsrow_heartbeat.log", "a");
@@ -1388,7 +1387,7 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
                     // Gate 3: [13160] -> if 0, skip to loc_825D375C (direct flush path)
                     fprintf(gf, "  Gate3 [13160]==0: %d (0=direct flush, 1=check further)\n", v13160 == 0);
                     if (v13160) {
-                        uint32_t v13160_152 = PPC_LOAD_U32(v13160 + 152);
+                        uint32_t v13160_152 = REX_LOAD_U32(v13160 + 152);
                         fprintf(gf, "  Gate4 [[13160]+152]=0x%08X (must be 0 for flush)\n", v13160_152);
                     }
                     // Gate 5: [12960] -> controls the flush path at loc_825D36F8
@@ -1435,7 +1434,7 @@ PPC_FUNC_IMPL(__imp__VdSwap) {
 
 // Trace GPU command buffer writer - this is the core function that writes PM4 to the command buffer
 extern "C" void __imp__sub_825CC640(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825CC640) {
+REX_EXTERN(sub_825CC640) {
     static int c = 0;
     c++;
     if (c <= 20 || (c % 1000 == 0)) {
@@ -1447,7 +1446,7 @@ PPC_FUNC(sub_825CC640) {
 
 // Track draw dispatch functions - these set up draw calls that should generate PM4_DRAW_INDX
 extern "C" void __imp__sub_825CCAB0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825CCAB0) {
+REX_EXTERN(sub_825CCAB0) {
     static int c = 0;
     if (++c <= 20) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1458,7 +1457,7 @@ PPC_FUNC(sub_825CCAB0) {
 
 // Track sub_825CCB78 - complex draw state machine dispatching different draw modes
 extern "C" void __imp__sub_825CCB78(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825CCB78) {
+REX_EXTERN(sub_825CCB78) {
     static int c = 0;
     if (++c <= 20) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1469,7 +1468,7 @@ PPC_FUNC(sub_825CCB78) {
 
 // Track shader/state setup
 extern "C" void __imp__sub_825CC5B0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_825CC5B0) {
+REX_EXTERN(sub_825CC5B0) {
     static int c = 0;
     if (++c <= 20) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1481,18 +1480,18 @@ PPC_FUNC(sub_825CC5B0) {
 // Stub XamInputGetKeystrokeEx - the SDK's input_system() returns null,
 // causing a crash at NULL+8 in GetKeystroke(). Override the SDK import directly.
 // The func_mapping maps 0x82788EE4 -> __imp__XamInputGetKeystrokeEx,
-// so PPC_FUNC(sub_82788EE4) doesn't intercept calls.
-// Use PPC_FUNC_IMPL to override the SDK's __imp__XamInputGetKeystrokeEx.
-PPC_FUNC_IMPL(__imp__XamInputGetKeystrokeEx) {
+// so REX_EXTERN(sub_82788EE4) doesn't intercept calls.
+// Use REX_EXTERN to override the SDK's __imp__XamInputGetKeystrokeEx.
+REX_EXTERN(__imp__XamInputGetKeystrokeEx) {
     // r3 = user_index_ptr, r4 = flags, r5 = keystroke_ptr
     // X_INPUT_KEYSTROKE: [+0] u16 virtual_key, [+2] u16 unicode, [+4] u16 flags, [+6] u8 user, [+7] u8 hid
     uint32_t keystroke_ptr = ctx.r5.u32;
     if (keystroke_ptr) {
-        for (int i = 0; i < 2; i++) PPC_STORE_U32(keystroke_ptr + i*4, 0);
+        for (int i = 0; i < 2; i++) REX_STORE_U32(keystroke_ptr + i*4, 0);
     }
     static int call_total = 0;
     call_total++;
-    uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t game_state = REX_LOAD_U32(0x8370DD7C);
     if (call_total <= 5 || (game_state >= 3 && call_total <= 50)) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[GetKeystrokeEx #%d] state=%u r3=0x%08X r4=0x%08X r5=0x%08X\n",
@@ -1521,11 +1520,11 @@ PPC_FUNC_IMPL(__imp__XamInputGetKeystrokeEx) {
             flags = 0x0002; // KEYUP
         }
         if (vk) {
-            PPC_STORE_U16(keystroke_ptr + 0, vk);
-            PPC_STORE_U16(keystroke_ptr + 2, 0);  // unicode
-            PPC_STORE_U16(keystroke_ptr + 4, flags);
-            PPC_STORE_U8(keystroke_ptr + 6, 0);   // user_index
-            PPC_STORE_U8(keystroke_ptr + 7, 0);   // hid_code
+            REX_STORE_U16(keystroke_ptr + 0, vk);
+            REX_STORE_U16(keystroke_ptr + 2, 0);  // unicode
+            REX_STORE_U16(keystroke_ptr + 4, flags);
+            REX_STORE_U8(keystroke_ptr + 6, 0);   // user_index
+            REX_STORE_U8(keystroke_ptr + 7, 0);   // hid_code
             static int key_c = 0;
             if (++key_c <= 20) {
                 FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1541,7 +1540,7 @@ PPC_FUNC_IMPL(__imp__XamInputGetKeystrokeEx) {
 }
 
 // Stub XamInputSetState - also crashes on null input_system()
-PPC_FUNC_IMPL(__imp__XamInputSetState) {
+REX_EXTERN(__imp__XamInputSetState) {
     ctx.r3.u64 = 0x80070481; // X_ERROR_DEVICE_NOT_CONNECTED
 }
 
@@ -1554,7 +1553,7 @@ PPC_FUNC_IMPL(__imp__XamInputSetState) {
 //   [+7] uint8  bRightTrigger
 //   [+8..15] thumbsticks (int16 x4)
 static std::atomic<int> g_input_frame{0};
-PPC_FUNC_IMPL(__imp__XamInputGetState) {
+REX_EXTERN(__imp__XamInputGetState) {
     uint32_t user = ctx.r3.u32;
     uint32_t state_ptr = ctx.r5.u32;
     static int gs_call = 0;
@@ -1569,10 +1568,10 @@ PPC_FUNC_IMPL(__imp__XamInputGetState) {
     }
     // Zero the struct first
     if (state_ptr) {
-        for (int i = 0; i < 8; i++) PPC_STORE_U32(state_ptr + i*4, 0);
+        for (int i = 0; i < 8; i++) REX_STORE_U32(state_ptr + i*4, 0);
     }
     // Return connected controller and simulate button presses after loading
-    uint32_t game_state = PPC_LOAD_U32(0x8370DD7C);
+    uint32_t game_state = REX_LOAD_U32(0x8370DD7C);
     if (user == 0 && state_ptr) {
         int frame = g_input_frame.fetch_add(1);
         // Log first few post-load calls
@@ -1590,10 +1589,10 @@ PPC_FUNC_IMPL(__imp__XamInputGetState) {
             if (cycle < 10) buttons = 0x0010;     // START
             else if (cycle >= 30 && cycle < 40) buttons = 0x1000;  // A
             if (buttons) {
-                PPC_STORE_U16(state_ptr + 4, buttons);
+                REX_STORE_U16(state_ptr + 4, buttons);
             }
             // Always set packet number
-            PPC_STORE_U32(state_ptr, (uint32_t)frame);
+            REX_STORE_U32(state_ptr, (uint32_t)frame);
         }
     }
     ctx.r3.u64 = 0; // X_ERROR_SUCCESS (connected)
@@ -1601,13 +1600,13 @@ PPC_FUNC_IMPL(__imp__XamInputGetState) {
 
 // Hook NtAllocateVirtualMemory to log failures (BaseHeap::Alloc page count too big)
 extern "C" void __imp__NtAllocateVirtualMemory(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_827893D4) { // NtAllocateVirtualMemory thunk
+REX_EXTERN(sub_827893D4) { // NtAllocateVirtualMemory thunk
     uint32_t base_addr_ptr = ctx.r3.u32;
     uint32_t region_size_ptr = ctx.r4.u32;
     uint32_t alloc_type = ctx.r5.u32;
     uint32_t protect = ctx.r6.u32;
-    uint32_t input_base = base_addr_ptr ? PPC_LOAD_U32(base_addr_ptr) : 0;
-    uint32_t input_size = region_size_ptr ? PPC_LOAD_U32(region_size_ptr) : 0;
+    uint32_t input_base = base_addr_ptr ? REX_LOAD_U32(base_addr_ptr) : 0;
+    uint32_t input_size = region_size_ptr ? REX_LOAD_U32(region_size_ptr) : 0;
 
     __imp__NtAllocateVirtualMemory(ctx, base);
 
@@ -1623,8 +1622,8 @@ PPC_FUNC(sub_827893D4) { // NtAllocateVirtualMemory thunk
             }
         }
     } else {
-        uint32_t out_addr = base_addr_ptr ? PPC_LOAD_U32(base_addr_ptr) : 0;
-        uint32_t out_size = region_size_ptr ? PPC_LOAD_U32(region_size_ptr) : 0;
+        uint32_t out_addr = base_addr_ptr ? REX_LOAD_U32(base_addr_ptr) : 0;
+        uint32_t out_size = region_size_ptr ? REX_LOAD_U32(region_size_ptr) : 0;
         static int ok_c = 0;
         if (++ok_c <= 30 || input_size >= 0x100000) { // log first 30 + any large allocs
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1656,7 +1655,7 @@ PPC_FUNC(sub_827893D4) { // NtAllocateVirtualMemory thunk
 // Fix: detect re-initialization and preserve the existing native object.
 // On re-init, just reset signal_state instead of creating a new semaphore.
 namespace rex { namespace kernel { namespace xboxkrnl {
-    extern void KeInitializeSemaphore_entry(ppc_ptr_t<rex::system::X_KSEMAPHORE>, ppc_u32_t, ppc_u32_t);
+    extern void KeInitializeSemaphore_entry(ppc_ptr_t<rex::system::X_KSEMAPHORE>, u32, u32);
 }}}
 
 // Track semaphore addresses that have been initialized
@@ -1666,7 +1665,7 @@ static uint32_t g_tracked_sem_flink[MAX_TRACKED_SEMS] = {};
 static uint32_t g_tracked_sem_blink[MAX_TRACKED_SEMS] = {};
 static int g_tracked_sem_count = 0;
 
-PPC_FUNC_IMPL(__imp__KeInitializeSemaphore) {
+REX_EXTERN(__imp__KeInitializeSemaphore) {
     uint32_t sem_addr = ctx.r3.u32;
     uint32_t count = ctx.r4.u32;
     uint32_t limit = ctx.r5.u32;
@@ -1678,8 +1677,8 @@ PPC_FUNC_IMPL(__imp__KeInitializeSemaphore) {
             // then let the SDK reinitialize properly.
             // The game code clobbered wait_list_flink/blink with self-pointers.
             // Restore kXObjSignature so GetNativeObject finds the existing object.
-            PPC_STORE_U32(sem_addr + 8, g_tracked_sem_flink[i]);   // wait_list_flink
-            PPC_STORE_U32(sem_addr + 12, g_tracked_sem_blink[i]);  // wait_list_blink
+            REX_STORE_U32(sem_addr + 8, g_tracked_sem_flink[i]);   // wait_list_flink
+            REX_STORE_U32(sem_addr + 12, g_tracked_sem_blink[i]);  // wait_list_blink
 
             // Set signal_state. The game passes count=0 to block threads until
             // work is queued. But with handle reuse, old threads are already
@@ -1687,7 +1686,7 @@ PPC_FUNC_IMPL(__imp__KeInitializeSemaphore) {
             // Set to 2 (matching the 2 IO threads) so they wake up and check
             // for new work items.
             uint32_t effective_count = (count == 0) ? 2 : count;
-            PPC_STORE_U32(sem_addr + 4, effective_count);  // signal_state
+            REX_STORE_U32(sem_addr + 4, effective_count);  // signal_state
 
             static int reinit_c = 0;
             if (++reinit_c <= 10) {
@@ -1700,12 +1699,12 @@ PPC_FUNC_IMPL(__imp__KeInitializeSemaphore) {
     }
 
     // First-time initialization - call real SDK implementation
-    rex::HostToGuestFunction<rex::kernel::xboxkrnl::KeInitializeSemaphore_entry>(ctx, base);
+    rex::ppc::HostToGuestFunction<rex::kernel::xboxkrnl::KeInitializeSemaphore_entry>(ctx, base);
 
     // Track the handle that was stashed
     if (g_tracked_sem_count < MAX_TRACKED_SEMS) {
-        uint32_t flink = PPC_LOAD_U32(sem_addr + 8);
-        uint32_t blink = PPC_LOAD_U32(sem_addr + 12);
+        uint32_t flink = REX_LOAD_U32(sem_addr + 8);
+        uint32_t blink = REX_LOAD_U32(sem_addr + 12);
         g_tracked_sem_addrs[g_tracked_sem_count] = sem_addr;
         g_tracked_sem_flink[g_tracked_sem_count] = flink;
         g_tracked_sem_blink[g_tracked_sem_count] = blink;
@@ -1718,10 +1717,10 @@ PPC_FUNC_IMPL(__imp__KeInitializeSemaphore) {
 
 // Hook worker thread (sub_826368E0) to capture semaphore handles and work function
 extern "C" void __imp__sub_826368E0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_826368E0) {
+REX_EXTERN(sub_826368E0) {
     uint32_t context = ctx.r3.u32;
-    uint32_t sem_handle = context ? PPC_LOAD_U32(context + 64) : 0;
-    uint32_t work_func = context ? PPC_LOAD_U32(context + 52) : 0;
+    uint32_t sem_handle = context ? REX_LOAD_U32(context + 64) : 0;
+    uint32_t work_func = context ? REX_LOAD_U32(context + 52) : 0;
     if (sem_handle && g_worker_sem_count < 16) {
         bool found = false;
         for (int i = 0; i < g_worker_sem_count; i++) {
@@ -1739,10 +1738,10 @@ PPC_FUNC(sub_826368E0) {
 
 // Hook streaming manager callback (sub_8265F720) and work finder (sub_8265F4F0)
 extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8265F4F0) {
+REX_EXTERN(sub_8265F4F0) {
     uint32_t filter = ctx.r3.u32;
     // Check the pending request count at 0x827A6BC4
-    uint32_t req_count = PPC_LOAD_U8(0x827A6BC4);
+    uint32_t req_count = REX_LOAD_U8(0x827A6BC4);
     __imp__sub_8265F4F0(ctx, base);
     static int c = 0;
     if (++c <= 20 || (c % 200 == 0)) {
@@ -1754,7 +1753,7 @@ PPC_FUNC(sub_8265F4F0) {
 
 extern "C" void __imp__sub_8265F720(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8265F720) {
+REX_EXTERN(sub_8265F720) {
     static int c = 0;
     c++;
     if (c <= 10) {
@@ -1778,11 +1777,11 @@ PPC_FUNC(sub_8265F720) {
 // they normally just return. We use that opportunity to call the streaming
 // callback which would otherwise deadlock on the main thread.
 extern "C" void __imp__sub_82636BB0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82636BB0) {
+REX_EXTERN(sub_82636BB0) {
     uint32_t context = ctx.r3.u32;
-    uint32_t item_before = context ? PPC_LOAD_U32(context + 44) : 0;
+    uint32_t item_before = context ? REX_LOAD_U32(context + 44) : 0;
     __imp__sub_82636BB0(ctx, base);
-    uint32_t item_after = context ? PPC_LOAD_U32(context + 44) : 0;
+    uint32_t item_after = context ? REX_LOAD_U32(context + 44) : 0;
     static int c = 0;
     if (++c <= 10 || item_after != 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1799,7 +1798,7 @@ PPC_FUNC(sub_82636BB0) {
 // The deadlock is in the resource lookup or vtable dispatch.
 // Stub it to return "not ready" (-1) so the caller retries later.
 extern "C" void __imp__sub_8260C318(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8260C318) {
+REX_EXTERN(sub_8260C318) {
     static int c = 0;
     c++;
     // Let the first call through (initial setup)
@@ -1855,7 +1854,7 @@ static bool io_sync_captured = false;
 
 // Hook sub_8260CC50 - called after IORead, does the actual work
 extern "C" void __imp__sub_8260CC50(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8260CC50) {
+REX_EXTERN(sub_8260CC50) {
     static int c = 0;
     if (++c <= 10) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1871,8 +1870,8 @@ PPC_FUNC(sub_8260CC50) {
         // The SDK's GetNativeObject sets wait_list_flink = kXObjSignature
         // and wait_list_blink = handle. Save these for restoration.
         for (int i = 0; i < IO_SYNC_COUNT; i++) {
-            io_sync_flink[i] = PPC_LOAD_U32(IO_SYNC_ADDRS[i] + 8);
-            io_sync_blink[i] = PPC_LOAD_U32(IO_SYNC_ADDRS[i] + 12);
+            io_sync_flink[i] = REX_LOAD_U32(IO_SYNC_ADDRS[i] + 8);
+            io_sync_blink[i] = REX_LOAD_U32(IO_SYNC_ADDRS[i] + 12);
         }
         io_sync_captured = true;
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1922,7 +1921,7 @@ PPC_FUNC(sub_8260CC50) {
 // After the first successful call, sub_8260CC50 tries to create 6 IO threads
 // which deadlocks. Return null on 2nd+ calls to skip thread creation.
 extern "C" void __imp__sub_8260FFC8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8260FFC8) {
+REX_EXTERN(sub_8260FFC8) {
     static int c = 0;
     if (++c <= 10) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -1937,7 +1936,7 @@ PPC_FUNC(sub_8260FFC8) {
 
 // Hook sub_82604F38 (registration loop) - called from IOWork to register IO items
 extern "C" void __imp__sub_82604F38(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82604F38) {
+REX_EXTERN(sub_82604F38) {
     static int c = 0;
     c++;
     if (c <= 20) {
@@ -1954,7 +1953,7 @@ PPC_FUNC(sub_82604F38) {
 
 // Hook sub_82622CB8 - called from IOWork after registration, sets up IO completion
 extern "C" void __imp__sub_82622CB8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82622CB8) {
+REX_EXTERN(sub_82622CB8) {
     static int c = 0;
     c++;
     uint32_t r4_arg = ctx.r4.u32; // output pointer (r30+64)
@@ -1967,10 +1966,10 @@ PPC_FUNC(sub_82622CB8) {
     if (c <= 10) {
         // Trace the vtable chain that IOWork will follow after we return:
         // [r4] -> obj -> [obj+68] -> sub_obj -> [sub_obj+0] -> vtable -> [vtable+28] -> target
-        uint32_t obj = r4_arg ? PPC_LOAD_U32(r4_arg) : 0;
-        uint32_t sub_obj = obj ? PPC_LOAD_U32(obj + 68) : 0;
-        uint32_t vtable = sub_obj ? PPC_LOAD_U32(sub_obj) : 0;
-        uint32_t vt28 = vtable ? PPC_LOAD_U32(vtable + 28) : 0;
+        uint32_t obj = r4_arg ? REX_LOAD_U32(r4_arg) : 0;
+        uint32_t sub_obj = obj ? REX_LOAD_U32(obj + 68) : 0;
+        uint32_t vtable = sub_obj ? REX_LOAD_U32(sub_obj) : 0;
+        uint32_t vt28 = vtable ? REX_LOAD_U32(vtable + 28) : 0;
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[IOSetup #%d] returned r3=0x%08X | vtable chain: [r4]=0x%08X [+68]=0x%08X vt=0x%08X vt[28]=0x%08X\n",
             c, ctx.r3.u32, obj, sub_obj, vtable, vt28); fclose(f); }
@@ -1979,7 +1978,7 @@ PPC_FUNC(sub_82622CB8) {
 
 // Hook sub_8260D068 - thread config generator inside IOWork
 extern "C" void __imp__sub_8260D068(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8260D068) {
+REX_EXTERN(sub_8260D068) {
     static int c = 0;
     c++;
     if (c <= 10) {
@@ -1996,7 +1995,7 @@ PPC_FUNC(sub_8260D068) {
             fprintf(f, "[ThreadCfg #%d] returned cfg@0x%08X: ", c, cfg_addr);
             if (cfg_addr) {
                 for (int i = 0; i < 20; i++) {
-                    fprintf(f, "%02X ", PPC_LOAD_U8(cfg_addr + i));
+                    fprintf(f, "%02X ", REX_LOAD_U8(cfg_addr + i));
                 }
             }
             fprintf(f, "\n");
@@ -2010,7 +2009,7 @@ PPC_FUNC(sub_8260D068) {
 // Second+ calls deadlock: XAudioRegisterRenderDriverClient acquires
 // global_critical_region_ which the audio callback thread already holds.
 extern "C" void __imp__sub_82600A68(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82600A68) {
+REX_EXTERN(sub_82600A68) {
     static int c = 0;
     c++;
     FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -2027,7 +2026,7 @@ PPC_FUNC(sub_82600A68) {
 // Hook sub_8260D180 - signals the IO event (0x832AD680) to wake IO threads
 // Called via sub_826230C8 vtable dispatch when work is submitted
 extern "C" void __imp__sub_8260D180(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8260D180) {
+REX_EXTERN(sub_8260D180) {
     static int c = 0;
     c++;
     if (c <= 20 || c % 100 == 0) {
@@ -2043,7 +2042,7 @@ PPC_FUNC(sub_8260D180) {
 
 // Hook sub_82604FB8 - the actual registration function called by sub_82604F38
 extern "C" void __imp__sub_82604FB8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82604FB8) {
+REX_EXTERN(sub_82604FB8) {
     static int c = 0;
     c++;
     if (c <= 20) {
@@ -2058,28 +2057,67 @@ PPC_FUNC(sub_82604FB8) {
     }
 }
 
-// Hook sub_8260C4F8 - called after BufAlloc succeeds, probably the IO read/completion
-extern "C" void __imp__sub_8260C4F8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8260C4F8) {
-    static int c = 0;
-    if (++c <= 10) {
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[IORead #%d] r3=0x%08X r4=0x%08X ENTER\n", c, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+// ---- IO format-handler registry: carry registrations across context swaps ---
+//
+// sub_8260C4F8 constructs an IO context (vtable, refcount, intrusive list heads)
+// and unconditionally installs it at dword_837102B4. It runs once per IO-context
+// create, so the "current" context is replaced constantly, and with it the
+// format-handler registry that hangs off [ctx+60].
+//
+// IO init re-registers handlers 0..2 on every new context, but handler 3 is
+// registered once, by game startup, through sub_82604D10 -> sub_8260D518. After
+// the first swap a lookup for 3 returns null (sub_8260FF68), sub_82610168 answers
+// E_NOTIMPL, sub_8260F990 propagates it, and sub_82105FE8 is left virtual-calling
+// a null list entry -- the "target 0x0000000F" abort.
+//
+// Reusing the first context instead does fix the abort but stalls the streaming
+// pipeline (the queue stops draining), so the contexts really are per-request.
+// Record every registration and replay it onto each newly built context instead.
+static constexpr int IO_HANDLER_SLOTS = 128;
+struct IoHandlerReg { bool set; uint32_t a, b, c; };
+static IoHandlerReg g_io_handlers[IO_HANDLER_SLOTS] = {};
+
+extern "C" void __imp__sub_8260D518(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260D518) {
+    uint32_t idx = ctx.r4.u32;
+    if (idx < IO_HANDLER_SLOTS) {
+        g_io_handlers[idx] = {true, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32};
     }
+    __imp__sub_8260D518(ctx, base);
+}
+
+extern "C" void __imp__sub_8260C4F8(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260C4F8) {
     __imp__sub_8260C4F8(ctx, base);
-    if (c <= 10) {
+    uint32_t new_ctx = ctx.r3.u32;
+    if (!new_ctx) return;
+
+    int replayed = 0;
+    for (int i = 0; i < IO_HANDLER_SLOTS; i++) {
+        if (!g_io_handlers[i].set) continue;
+        PPCContext rc = ctx;
+        rc.r3.u64 = new_ctx;
+        rc.r4.u64 = (uint32_t)i;
+        rc.r5.u64 = g_io_handlers[i].a;
+        rc.r6.u64 = g_io_handlers[i].b;
+        rc.r7.u64 = g_io_handlers[i].c;
+        __imp__sub_8260D518(rc, base);
+        replayed++;
+    }
+    static int c = 0;
+    if (++c <= 5 || c % 200 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[IORead #%d] returned r3=0x%08X\n", c, ctx.r3.u32); fclose(f); }
+        if (f) { fprintf(f, "[IOCtx #%d] new=0x%08X replayed %d handler(s)\n", c, new_ctx, replayed); fclose(f); }
     }
 }
 
 // Hook sub_82623408 (buffer allocator, vtable[20]) to find what vtable[16] call blocks
 extern "C" void __imp__sub_82623408(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82623408) {
+REX_EXTERN(sub_82623408) {
     uint32_t obj = ctx.r3.u32;
     uint32_t size = ctx.r4.u32;
-    uint32_t vtable = obj ? PPC_LOAD_U32(obj) : 0;
-    uint32_t vt16 = vtable ? PPC_LOAD_U32(vtable + 16) : 0;
+    uint32_t vtable = obj ? REX_LOAD_U32(obj) : 0;
+    uint32_t vt16 = vtable ? REX_LOAD_U32(vtable + 16) : 0;
     static int c = 0;
     if (++c <= 30) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -2094,7 +2132,7 @@ PPC_FUNC(sub_82623408) {
 
 // Hook sub_82623160 (called when obj is null in sub_82623250) — might block
 extern "C" void __imp__sub_82623160(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82623160) {
+REX_EXTERN(sub_82623160) {
     static int c = 0;
     if (++c <= 10) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -2109,15 +2147,15 @@ PPC_FUNC(sub_82623160) {
 
 // Hook sub_82623250 to trace vtable calls and find the blocking one
 extern "C" void __imp__sub_82623250(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82623250) {
+REX_EXTERN(sub_82623250) {
     uint32_t hash = ctx.r3.u32;
     uint32_t data = ctx.r4.u32;
     uint32_t ctx_ptr = ctx.r5.u32;
-    uint32_t obj = ctx_ptr ? PPC_LOAD_U32(ctx_ptr) : 0;
-    uint32_t vtable = obj ? PPC_LOAD_U32(obj) : 0;
-    uint32_t vt0 = vtable ? PPC_LOAD_U32(vtable + 0) : 0;
-    uint32_t vt8 = vtable ? PPC_LOAD_U32(vtable + 8) : 0;
-    uint32_t vt12 = vtable ? PPC_LOAD_U32(vtable + 12) : 0;
+    uint32_t obj = ctx_ptr ? REX_LOAD_U32(ctx_ptr) : 0;
+    uint32_t vtable = obj ? REX_LOAD_U32(obj) : 0;
+    uint32_t vt0 = vtable ? REX_LOAD_U32(vtable + 0) : 0;
+    uint32_t vt8 = vtable ? REX_LOAD_U32(vtable + 8) : 0;
+    uint32_t vt12 = vtable ? REX_LOAD_U32(vtable + 12) : 0;
     static int c = 0;
     if (++c <= 10) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -2130,9 +2168,9 @@ PPC_FUNC(sub_82623250) {
     __imp__sub_82623250(ctx, base);
     // After sub_82623250 returns, [r5] may now point to a newly created object
     // (sub_82623160 creates it when obj was null). Log the vtable function.
-    uint32_t obj_after = ctx_ptr ? PPC_LOAD_U32(ctx_ptr) : 0;
-    uint32_t vt_after = obj_after ? PPC_LOAD_U32(obj_after) : 0;
-    uint32_t vt5_after = vt_after ? PPC_LOAD_U32(vt_after + 20) : 0;
+    uint32_t obj_after = ctx_ptr ? REX_LOAD_U32(ctx_ptr) : 0;
+    uint32_t vt_after = obj_after ? REX_LOAD_U32(obj_after) : 0;
+    uint32_t vt5_after = vt_after ? REX_LOAD_U32(vt_after + 20) : 0;
     if (c <= 10) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[ResLookup #%d] returned r3=0x%08X obj_now=0x%08X vt=0x%08X vt[20]=0x%08X\n",
@@ -2146,15 +2184,15 @@ std::atomic<bool> g_skip_thread_creation{false};
 // Override ExCreateThread to skip during IO re-init.
 // KeInitializeSemaphore can't be overridden (SDK uses templated ppc_ptr_t<X_KSEMAPHORE>).
 namespace rex { namespace kernel { namespace xboxkrnl {
-    extern ppc_u32_result_t ExCreateThread_entry(ppc_pu32_t, ppc_u32_t,
-        ppc_pu32_t, ppc_u32_t, ppc_pvoid_t, ppc_pvoid_t, ppc_u32_t);
+    extern u32 ExCreateThread_entry(mapped_u32, u32,
+        mapped_u32, u32, mapped_void, mapped_void, u32);
 }}}
 
 // Track handles from real ExCreateThread calls for reuse
 static uint32_t g_io_thread_handles[8] = {};
 static int g_io_thread_handle_count = 0;
 
-PPC_FUNC_IMPL(__imp__ExCreateThread) {
+REX_EXTERN(__imp__ExCreateThread) {
     uint32_t handle_out_addr = ctx.r3.u32;
 
     if (g_skip_thread_creation.load()) {
@@ -2167,7 +2205,7 @@ PPC_FUNC_IMPL(__imp__ExCreateThread) {
             static int reuse_idx = 0;
             uint32_t reuse_handle = g_io_thread_handles[reuse_idx % g_io_thread_handle_count];
             reuse_idx++;
-            PPC_STORE_U32(handle_out_addr, reuse_handle);
+            REX_STORE_U32(handle_out_addr, reuse_handle);
             ctx.r3.u64 = 0; // success
             static int skip_c = 0;
             if (++skip_c <= 10) {
@@ -2187,9 +2225,9 @@ PPC_FUNC_IMPL(__imp__ExCreateThread) {
     }
 
     // Real thread creation — capture handle for reuse
-    rex::HostToGuestFunction<rex::kernel::xboxkrnl::ExCreateThread_entry>(ctx, base);
+    rex::ppc::HostToGuestFunction<rex::kernel::xboxkrnl::ExCreateThread_entry>(ctx, base);
     if (ctx.r3.u32 == 0 && handle_out_addr && g_io_thread_handle_count < 8) {
-        uint32_t new_handle = PPC_LOAD_U32(handle_out_addr);
+        uint32_t new_handle = REX_LOAD_U32(handle_out_addr);
         if (new_handle) {
             g_io_thread_handles[g_io_thread_handle_count++] = new_handle;
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -2201,7 +2239,7 @@ PPC_FUNC_IMPL(__imp__ExCreateThread) {
 
 // Hook XamLoaderTerminateTitle to catch game exits
 extern "C" void __imp__XamLoaderTerminateTitle(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82789084) {
+REX_EXTERN(sub_82789084) {
     FILE* f = fopen("saintsrow_heartbeat.log", "a");
     if (f) { fprintf(f, "[TERMINATE] XamLoaderTerminateTitle called! Blocking exit.\n"); fclose(f); }
     // Don't actually terminate - just sleep forever
@@ -2210,7 +2248,7 @@ PPC_FUNC(sub_82789084) {
 
 // Hook game init to trace progress
 extern "C" void __imp__sub_827176E0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_827176E0) {
+REX_EXTERN(sub_827176E0) {
     FILE* f = fopen("saintsrow_heartbeat.log", "a");
     if (f) { fprintf(f, "[GAME-INIT] entering sub_827176E0\n"); fclose(f); }
     __imp__sub_827176E0(ctx, base);
@@ -2220,7 +2258,7 @@ PPC_FUNC(sub_827176E0) {
 
 // Hook xstart to trace the main game flow
 extern "C" void __imp__xstart(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_IMPL(xstart) {
+REX_EXTERN(xstart) {
     FILE* f = fopen("saintsrow_heartbeat.log", "a");
     if (f) { fprintf(f, "[XSTART] entering\n"); fclose(f); }
     __imp__xstart(ctx, base);
@@ -2240,3 +2278,170 @@ extern "C" uint32_t XamContentGetLicenseMask_entry(
     if (mask_ptr) *mask_ptr = 0xFFFFFFFF;
     return 0;  // X_ERROR_SUCCESS
 }
+
+// ---- Front-end init object-creation chain (current top blocker) -------------
+// sub_82105FE8 virtual-calls every entry of the list at [r26+8]. The slot is
+// filled only when sub_8260F990 returns >= 0; the game never checks, so a
+// failure leaves a null there and the vtable load returns garbage (target 0x0F).
+// Trace the chain to find which link fails:
+//   sub_8260F990 -> sub_826243D8 -> sub_826235B8   (allocation)
+//                -> sub_82623250(0x61820006, &out) (type-ID factory)
+#define RETTRACE(fn, cap)                                                              \
+    extern "C" void __imp__##fn(PPCContext& ctx, uint8_t* base);                       \
+    REX_EXTERN(fn) {                                                                   \
+        static int c = 0;                                                              \
+        int n = ++c;                                                                   \
+        uint32_t a3 = ctx.r3.u32, a4 = ctx.r4.u32, a5 = ctx.r5.u32;                    \
+        __imp__##fn(ctx, base);                                                        \
+        if (n <= (cap)) {                                                              \
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");                           \
+            if (f) {                                                                   \
+                fprintf(f, "[CHAIN] " #fn " #%d(r3=0x%08X r4=0x%08X r5=0x%08X) -> %d\n", \
+                        n, a3, a4, a5, ctx.r3.s32);                                    \
+                fclose(f);                                                             \
+            }                                                                          \
+        }                                                                              \
+    }
+RETTRACE(sub_8260F990, 20)
+// sub_826243D8 returns E_NOTIMPL (0x80004001) during front-end init. Two ways
+// out: sub_826235B8 failing, or the vtable call on [[dword_837102B4]+60]-8
+// (slot 20). Dump that chain on every failure so we can see which link is null.
+extern "C" void __imp__sub_826243D8(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_826243D8) {
+    uint32_t a3 = ctx.r3.u32, a4 = ctx.r4.u32;
+    __imp__sub_826243D8(ctx, base);
+    int32_t ret = ctx.r3.s32;
+    static int c = 0, failed = 0;
+    bool log = (++c <= 20) || (ret < 0 && ++failed <= 10);
+    if (log) {
+        uint32_t g1 = REX_LOAD_U32(0x837102B4);
+        uint32_t g2 = g1 ? REX_LOAD_U32(g1 + 60) : 0;
+        uint32_t obj = g2 ? g2 - 8 : 0;
+        uint32_t vt = obj ? REX_LOAD_U32(obj) : 0;
+        uint32_t fn = vt ? REX_LOAD_U32(vt + 20) : 0;
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "[CHAIN] sub_826243D8 #%d(r3=0x%08X r4=0x%08X) -> 0x%08X | [837102B4]=0x%08X +60=0x%08X obj=0x%08X vt=0x%08X vt[20]=0x%08X\n",
+                    c, a3, a4, (uint32_t)ret, g1, g2, obj, vt, fn);
+            fclose(f);
+        }
+    }
+}
+RETTRACE(sub_826235B8, 400)
+
+// The victim: log the list slot right before the virtual call would use it.
+extern "C" void __imp__sub_82105FE8(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_82105FE8) {
+    static int c = 0;
+    int n = ++c;
+    if (n <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[CHAIN] sub_82105FE8 #%d ENTER r3=0x%08X r4=0x%08X\n",
+                         n, ctx.r3.u32, ctx.r4.u32); fclose(f); }
+    }
+    __imp__sub_82105FE8(ctx, base);
+    if (n <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[CHAIN] sub_82105FE8 #%d EXIT\n", n); fclose(f); }
+    }
+}
+
+// ---- IO format-handler lookup: survive context swaps ------------------------
+//
+// sub_8260FF68(registry, idx) resolves a format handler:
+//   idx <= 127 -> table [registry+12], bound [registry+8]
+//   idx >  127 -> table [registry+20], bound [registry+16], idx -= 128
+// An 8-byte entry counts as registered only when both dwords are non-zero.
+//
+// The registry hangs off the current IO context ([ctx+60]-8) and sub_8260C4F8
+// installs a brand-new context at dword_837102B4 on every IO-context create.
+// IO init re-registers handlers 0..2 on each new context, but the later ones are
+// registered once during startup, so after the first swap a lookup for 3 misses.
+// sub_82610168 then answers E_NOTIMPL, sub_8260F990 propagates it, and
+// sub_82105FE8 virtual-calls the null it was left with -- the 0x0000000F abort.
+//
+// Every caller funnels through this lookup, so one fallback here covers them all:
+// on a miss, resolve against the first registry we ever saw, which still holds
+// the full set. Entries are pointers to static handler descriptors, so handing
+// back one from the older table is safe.
+//
+// ponytail: fallback rather than re-registering on each new context, because the
+// registrar that populates these tables from the descriptor list at 0x8203B56C
+// is not sub_8260D518 (hooking that records nothing). If the real registrar turns
+// up, replaying it on construction is the tidier fix.
+// Registries seen so far. Handlers land on whichever context was current when
+// they were registered, so a miss on today's context may still be satisfiable
+// from an earlier one.
+static constexpr int IO_REG_MAX = 64;
+static uint32_t g_io_registries[IO_REG_MAX] = {};
+static int g_io_registry_count = 0;
+
+// Resolve idx against one registry exactly the way sub_8260FF68 does.
+static uint32_t IoRegLookup(uint8_t* base, uint32_t reg, uint32_t idx) {
+    uint32_t bound, table;
+    if (idx <= 127) {
+        bound = REX_LOAD_U32(reg + 8);
+        table = REX_LOAD_U32(reg + 12);
+    } else {
+        idx -= 128;
+        bound = REX_LOAD_U32(reg + 16);
+        table = REX_LOAD_U32(reg + 20);
+    }
+    if (!table || idx >= bound) return 0;
+    uint32_t entry = table + idx * 8;
+    if (REX_LOAD_U32(entry + 4) == 0 || REX_LOAD_U32(entry) == 0) return 0;
+    return entry;
+}
+
+extern "C" void __imp__sub_8260FF68(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260FF68) {
+    uint32_t self = ctx.r3.u32, idx = ctx.r4.u32 & 0xFF;
+    __imp__sub_8260FF68(ctx, base);
+    if (self) {
+        bool known = false;
+        for (int i = 0; i < g_io_registry_count; i++)
+            if (g_io_registries[i] == self) { known = true; break; }
+        if (!known && g_io_registry_count < IO_REG_MAX)
+            g_io_registries[g_io_registry_count++] = self;
+    }
+    if (ctx.r3.u32 != 0) return;
+
+    for (int i = 0; i < g_io_registry_count; i++) {
+        uint32_t reg = g_io_registries[i];
+        if (reg == self) continue;
+        uint32_t entry = IoRegLookup(base, reg, idx);
+        if (!entry) continue;
+        ctx.r3.u64 = entry;
+        static int c = 0;
+        if (++c <= 10 || c % 500 == 0) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOReg #%d] idx=%u missed on 0x%08X, served from 0x%08X\n",
+                             c, idx, self, reg); fclose(f); }
+        }
+        return;
+    }
+    static int m = 0;
+    if (++m <= 10) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IOReg] idx=%u MISS on all %d known registries\n",
+                         idx, g_io_registry_count); fclose(f); }
+    }
+}
+
+// sub_82604D10(idx, fn, ?, ctx) registers a handler on the current IO context
+// (dword_837102B4) via sub_8260D518, or returns 0x80004005 when no context is
+// installed. Log every call: a registration that bails here never reaches any
+// registry, which is why an index can be missing from all of them.
+extern "C" void __imp__sub_82604D10(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_82604D10) {
+    uint32_t a3 = ctx.r3.u32, a4 = ctx.r4.u32, a6 = ctx.r6.u32;
+    uint32_t g = REX_LOAD_U32(0x837102B4);
+    __imp__sub_82604D10(ctx, base);
+    static int c = 0;
+    if (++c <= 30) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[IOReg-add #%d] idx=%u fn=0x%08X ctx=0x%08X global=0x%08X -> 0x%08X\n",
+                         c, a3, a4, a6, g, ctx.r3.u32); fclose(f); }
+    }
+}
+

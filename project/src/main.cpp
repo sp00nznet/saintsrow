@@ -1,28 +1,39 @@
 // Saints Row (Xbox 360, 2006) - ReXGlue Recompiled Project
 // Minimal bootstrap - gets the runtime up and launches the XEX module
 
-#include "saintsrow_config.h"
 #include "saintsrow_init.h"
 
+#include <rex/rex_app.h>
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
-#include <rex/runtime.h>
 #include <rex/logging.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
-#include <rex/kernel/init.h>
-#if REX_HAS_D3D12
-#include <rex/graphics/d3d12/graphics_system.h>
-#endif
-#include <rex/audio/sdl/sdl_audio_system.h>
-#include <rex/input/input_system.h>
-#include <rex/ui/window.h>
-#include <rex/ui/window_listener.h>
-#include <rex/ui/windowed_app.h>
+#include <rex/runtime.h>
+#include <rex/system/thread_state.h>
 
-#include <atomic>
+#include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <thread>
+
+// REX_FATAL (e.g. "Call to invalid or unregistered function") ends in
+// std::abort(), which unwinds nothing and names no guest code. The aborting
+// thread is a guest thread, so its PPCContext still holds the exact call site:
+// lr is the return address the recompiled caller stored before the indirect
+// call, and last_indirect_target is the address it tried to reach.
+static void FatalGuestContextHandler(int) {
+    FILE* f = fopen("saintsrow_fatal.log", "a");
+    if (!f) return;
+    auto* ts = rex::runtime::ThreadState::Get();
+    if (ts && ts->context()) {
+        auto* c = ts->context();
+        fprintf(f, "[ABORT] guest lr=0x%08X target=0x%08X r3=0x%08X r4=0x%08X r5=0x%08X r11=0x%08X\n",
+            (uint32_t)c->lr, c->last_indirect_target,
+            c->r3.u32, c->r4.u32, c->r5.u32, c->r11.u32);
+    } else {
+        fprintf(f, "[ABORT] no guest thread state bound\n");
+    }
+    fclose(f);
+}
 
 #ifdef _WIN32
 #include <windows.h>
@@ -115,10 +126,10 @@ static void InitNullObjectPage(uint8_t* membase) {
     // Make every 4-byte slot self-referencing with the HOST address
     // The generated x86 code works with host addresses directly
     // For 64-bit pointers, fill with the host address
-    // For 32-bit PPC loads (PPC_LOAD_U32), fill with guest address
+    // For 32-bit PPC loads (REX_LOAD_U32), fill with guest address
     // Since the code might use either, use 0 (safest) -- the demand pager
     // will handle subsequent faults
-    // Actually: the generated code uses PPC_LOAD_U32 which reads from
+    // Actually: the generated code uses REX_LOAD_U32 which reads from
     // (base + guest_addr), so the values stored should be guest addresses
     // that will be translated. Let's fill with the guest addr.
     uint32_t* slots = (uint32_t*)host;
@@ -821,188 +832,44 @@ null_page_handler:
 // VEH registered in OnInitialize after SDK setup
 #endif
 
-class SaintsRowApp : public rex::ui::WindowedApp, public rex::ui::WindowListener {
-public:
-    static std::unique_ptr<rex::ui::WindowedApp> Create(rex::ui::WindowedAppContext& ctx) {
-        return std::make_unique<SaintsRowApp>(ctx);
+class SaintsRowApp : public rex::ReXApp {
+ public:
+  using rex::ReXApp::ReXApp;
+
+  static std::unique_ptr<rex::ui::WindowedApp> Create(rex::ui::WindowedAppContext& ctx) {
+    return std::unique_ptr<SaintsRowApp>(new SaintsRowApp(ctx, "saintsrow", PPCImageConfig));
+  }
+
+ protected:
+  // The GPU is a runtime-loaded plugin in SDK 0.10+; xenos is the emulated Xenos.
+  void OnPreSetup(rex::RuntimeConfig& config) override {
+    if (config.gpu_plugin.empty()) {
+      config.gpu_plugin = "xenos";
     }
+  }
 
-    SaintsRowApp(rex::ui::WindowedAppContext& ctx)
-        : WindowedApp(ctx, "saintsrow", "[game_directory]") {
-        AddPositionalOption("game_directory");
+  // Game data lives in <repo>/extracted, next to the build tree.
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    if (paths.game_data_root.empty()) {
+      paths.game_data_root = rex::filesystem::GetExecutableFolder() / ".." / "extracted";
     }
+  }
 
-    bool OnInitialize() override {
-        auto exe_dir = rex::filesystem::GetExecutableFolder();
+#ifdef _WIN32
+  // The null page must exist before any guest code runs, and the VEH must be
+  // registered after the SDK installs its own handlers so ours runs first.
+  void OnPostLoadXexImage() override {
+    InitNullObjectPage(runtime()->memory()->virtual_membase());
+    REXLOG_INFO("Null object page at guest 0x{:08X}", g_null_object_guest_addr);
+    AddVectoredExceptionHandler(1, NullPageHandler);
+  }
 
-        std::filesystem::path game_dir;
-        if (auto arg = GetArgument("game_directory")) {
-            game_dir = *arg;
-        } else {
-            game_dir = exe_dir / ".." / "extracted";
-        }
-
-        std::string log_file_cvar = "saintsrow_sdk.log";
-        std::string log_level_str = REXCVAR_GET(log_level);
-        if (REXCVAR_GET(log_verbose) && log_level_str == "info") {
-            log_level_str = "trace";
-        }
-        auto log_config = rex::BuildLogConfig(
-            log_file_cvar.empty() ? nullptr : log_file_cvar.c_str(),
-            log_level_str, {});
-        rex::InitLogging(log_config);
-        rex::RegisterLogLevelCallback();
-        REXLOG_INFO("Saints Row starting");
-        REXLOG_INFO("  Game directory: {}", game_dir.string());
-
-        // Create and initialize runtime with full backend config
-        runtime_ = std::make_unique<rex::Runtime>(game_dir);
-        runtime_->set_app_context(&app_context());
-
-        rex::RuntimeConfig config;
-#if REX_HAS_D3D12
-        config.graphics = REX_GRAPHICS_BACKEND(rex::graphics::d3d12::D3D12GraphicsSystem);
+  void OnPreLaunchModule() override {
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    signal(SIGABRT, FatalGuestContextHandler);
+    std::thread(WatchdogThread).detach();
+  }
 #endif
-        config.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
-        config.input_factory = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
-        config.kernel_init = rex::kernel::InitializeKernel;
-
-        auto status = runtime_->Setup(
-            static_cast<uint32_t>(PPC_CODE_BASE),
-            static_cast<uint32_t>(PPC_CODE_SIZE),
-            static_cast<uint32_t>(PPC_IMAGE_BASE),
-            static_cast<uint32_t>(PPC_IMAGE_SIZE),
-            PPCFuncMappings,
-            std::move(config));
-        if (XFAILED(status)) {
-            REXLOG_ERROR("Runtime setup failed: {:08X}", status);
-            return false;
-        }
-
-        // Test guest memory access before loading XEX
-        {
-            auto* mem = runtime_->memory();
-            if (mem) {
-                auto* heap = mem->LookupHeap(0x82000000);
-                REXLOG_INFO("Memory heap for 0x82000000: {}", heap ? "VALID" : "NULL");
-                if (heap) {
-                    REXLOG_INFO("  Heap page_size={}, host_offset=0x{:X}",
-                        heap->page_size(), heap->host_address_offset());
-                    // Try translating the address
-                    uint8_t* host = mem->TranslateVirtual(0x82000000u);
-                    REXLOG_INFO("  TranslateVirtual(0x82000000) = {}", (void*)host);
-                    // Try a small allocation
-                    bool ok = heap->AllocFixed(0x82000000, 4096, 4096,
-                        rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-                        rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
-                    REXLOG_INFO("  Test AllocFixed: {}", ok ? "OK" : "FAILED");
-                    if (ok) {
-                        // Try writing to it
-                        *host = 0x42;
-                        REXLOG_INFO("  Test write: OK (read back: 0x{:02X})", *host);
-                        heap->Decommit(0x82000000, 4096);
-                    }
-                }
-            }
-        }
-
-        // Load XEX image
-        status = runtime_->LoadXexImage("game:\\default.xex");
-        if (XFAILED(status)) {
-            REXLOG_ERROR("Failed to load XEX: {:08X}", status);
-            return false;
-        }
-        REXLOG_INFO("XEX image loaded successfully!");
-        spdlog::default_logger()->flush();
-
-        // Initialize null object page in guest memory
-        InitNullObjectPage(runtime_->memory()->virtual_membase());
-        REXLOG_INFO("Null object page at guest 0x{:08X}", g_null_object_guest_addr);
-
-        // Register null page handler AFTER SDK initialization
-        AddVectoredExceptionHandler(1, NullPageHandler);
-        REXLOG_INFO("Null page handler registered");
-
-        // Start watchdog thread to sample PPC execution
-        std::thread(WatchdogThread).detach();
-
-        REXLOG_INFO("XEX fully loaded. Attempting window creation...");
-        spdlog::default_logger()->flush();
-
-        // Create window
-        window_ = rex::ui::Window::Create(app_context(), "Saints Row - Recomp", 1280, 720);
-        if (!window_) {
-            REXLOG_ERROR("Failed to create window");
-            return false;
-        }
-
-        window_->AddListener(this);
-        window_->Open();
-        runtime_->set_display_window(window_.get());
-
-        // Connect the GPU presenter to the window surface.
-        // Without this, the D3D12 swap chain is never created for the window
-        // and Present() never reaches the screen.
-        auto* gs = static_cast<rex::graphics::GraphicsSystem*>(runtime_->graphics_system());
-        if (gs && gs->presenter()) {
-            window_->SetPresenter(gs->presenter());
-            REXLOG_INFO("Presenter connected to window");
-        } else {
-            REXLOG_ERROR("No presenter available to connect to window");
-        }
-
-        // Launch module
-        app_context().CallInUIThreadDeferred([this]() {
-            auto main_thread = runtime_->LaunchModule();
-            if (!main_thread) {
-                REXLOG_ERROR("Failed to launch module");
-                app_context().QuitFromUIThread();
-                return;
-            }
-
-            module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {
-                main_thread->Wait(0, 0, 0, nullptr);
-                REXLOG_INFO("Execution complete");
-                if (!shutting_down_.load(std::memory_order_acquire)) {
-                    app_context().CallInUIThread([this]() {
-                        app_context().QuitFromUIThread();
-                    });
-                }
-            });
-        });
-
-        return true;
-    }
-
-    void OnClosing(rex::ui::UIEvent& e) override {
-        (void)e;
-        REXLOG_INFO("Window closing, shutting down...");
-        shutting_down_.store(true, std::memory_order_release);
-        if (runtime_ && runtime_->kernel_state()) {
-            runtime_->kernel_state()->TerminateTitle();
-        }
-        app_context().QuitFromUIThread();
-    }
-
-    void OnDestroy() override {
-        if (window_) {
-            window_->SetPresenter(nullptr);
-        }
-        if (module_thread_.joinable()) {
-            module_thread_.join();
-        }
-        if (window_) {
-            window_->RemoveListener(this);
-        }
-        window_.reset();
-        runtime_.reset();
-    }
-
-private:
-    std::unique_ptr<rex::Runtime> runtime_;
-    std::unique_ptr<rex::ui::Window> window_;
-    std::thread module_thread_;
-    std::atomic<bool> shutting_down_{false};
 };
 
-XE_DEFINE_WINDOWED_APP(saintsrow, SaintsRowApp::Create)
+REX_DEFINE_APP(saintsrow, SaintsRowApp::Create)

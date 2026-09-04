@@ -1,0 +1,71 @@
+# Saints Row (Xbox 360, 2006) - ReXGlue manifest
+
+[project]
+name = "saintsrow"
+sdk_version = "0.10.0"
+game_root = "../extracted"
+
+[entrypoint]
+file_path = "../extracted/default.xex"
+out_directory_path = "../generated/default"
+
+# ABI helper addresses (savegprlr/restgprlr/savefpr/restfpr/savevmx/restvmx) are
+# auto-detected by 0.10.0 codegen; no setjmp/longjmp in this image.
+
+# Manual function definitions for unresolved branch targets.
+#
+# C++ adjustor thunks: 8-byte `addi rX,rX,-N; b target` pairs packed into
+# tables. Only vtables reference them, so the scanner never sees a call and
+# leaves them out of the dispatch table -- an indirect call through one then
+# aborts with "Call to invalid or unregistered function". Regenerate the list
+# with a scan for runs of >=3 consecutive thunk pairs not already emitted.
+[entrypoint.functions]
+0x8222F9C4 = { name = "sub_8222F9C4", size = 8 }
+0x8222F9CC = { name = "sub_8222F9CC", size = 8 }
+0x8222F9D4 = { name = "sub_8222F9D4", size = 8 }
+0x8222FC58 = { name = "sub_8222FC58", size = 8 }
+0x8222FC60 = { name = "sub_8222FC60", size = 8 }
+0x8222FC68 = { name = "sub_8222FC68", size = 8 }
+0x822300A8 = { name = "sub_822300A8", size = 8 }
+0x822300B0 = { name = "sub_822300B0", size = 8 }
+0x822300B8 = { name = "sub_822300B8", size = 8 }
+0x82256500 = { name = "sub_82256500", size = 8 }
+0x82261748 = { name = "sub_82261748", size = 8 }
+0x8227DE20 = { name = "sub_8227DE20", size = 8 }
+0x8235EE54 = { name = "sub_8235EE54", size = 8 }
+0x8235EE5C = { name = "sub_8235EE5C", size = 8 }
+0x8235EE64 = { name = "sub_8235EE64", size = 8 }
+0x8235EE6C = { name = "sub_8235EE6C", size = 8 }
+0x823625C8 = { name = "sub_823625C8", size = 8 }
+0x823625D0 = { name = "sub_823625D0", size = 8 }
+0x823625D8 = { name = "sub_823625D8", size = 8 }
+0x823625E0 = { name = "sub_823625E0", size = 8 }
+0x82388B64 = { name = "sub_82388B64", size = 8 }
+0x82388B6C = { name = "sub_82388B6C", size = 8 }
+0x82388B74 = { name = "sub_82388B74", size = 8 }
+0x82388B7C = { name = "sub_82388B7C", size = 8 }
+0x825EFED8 = { name = "sub_825EFED8", size = 8 }
+0x82608C20 = { name = "sub_82608C20", size = 8 }
+0x82608C88 = { name = "sub_82608C88", size = 8 }
+0x82608C90 = { name = "sub_82608C90", size = 8 }
+0x82609D38 = { name = "sub_82609D38", size = 8 }
+0x82609D40 = { name = "sub_82609D40", size = 8 }
+0x82609D48 = { name = "sub_82609D48", size = 8 }
+0x82609D68 = { name = "sub_82609D68", size = 8 }
+0x82609D80 = { name = "sub_82609D80", size = 8 }
+0x82609D90 = { name = "sub_82609D90", size = 8 }
+0x826235B0 = { name = "sub_826235B0", size = 8 }
+0x82688B98 = { name = "sub_82688B98", size = 8 }
+0x826DB7F8 = { name = "sub_826DB7F8", size = 8 }
+0x8278E628 = { name = "sub_8278E628", size = 8 }
+0x8278E630 = { name = "sub_8278E630", size = 8 }
+0x8278E638 = { name = "sub_8278E638", size = 8 }
+0x8222F9EC = { name = "sub_8222F9EC" }
+0x8222FC88 = { name = "sub_8222FC88" }
+0x822300D0 = { name = "sub_822300D0" }
+0x8235EE78 = { name = "sub_8235EE78" }
+0x823625EC = { name = "sub_823625EC" }
+0x82388B88 = { name = "sub_82388B88" }
+0x82608CC0 = { name = "sub_82608CC0" }
+0x826090D8 = { name = "sub_826090D8" }
+0x8278E644 = { name = "sub_8278E644" }

@@ -39,3 +39,9 @@ thirdparty/
 # Claude
 .claude/
 project/build4/
+project/generated/
+project/build*/
+tools/rexglue-sdk/
+tools/rexglue-sdk-prebuilt*/
+tools/rexglue-sdk*.zip
+tools/XenonRecomp/
