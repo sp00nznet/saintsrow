@@ -99,7 +99,8 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Clear the tiled bit in the game's own swap packet (fixes the colour cast)
 - [x] Drop the synthetic controller input; the SDK's real SDL input drives the game now
 - [x] Legal -> FMV -> main menu -> New Game all work, with correct graphics and real input
-- [ ] The level load behind the church screen never starts: the spinner animates but streaming issues no IO
+- [x] Diagnose the church-screen stall: streaming is pumped only from the boot state machine
+- [ ] Dispatch queued IO in-game without leaking IO contexts (see below)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
@@ -217,6 +218,36 @@ What this does not do is explain why nothing registers record 4. Neither `sub_82
 `sub_8260D518` (hooking it shows the handler table unchanged across the call) nor anything
 reachable by an immediate reference to `0x8203B56C` writes these slots. Find the real registrar and
 the fallback goes away.
+
+### Why the level load behind the church screen does nothing (2026-09-05)
+
+`StreamCallback` (`sub_8265F720`) dispatches queued IO, and it was only ever pumped from
+`sub_822827B0` -- the **boot** state machine. That is fine while booting, but once the real game
+loop owns the frame `sub_822827B0` stops being called, so after New Game the level load queues work
+that nothing ever dispatches.
+
+Proving that needed new instrumentation: every existing probe in `stubs.cpp` caps its logging
+(`if (++c <= 20)`), so after a long session a *stopped* subsystem is indistinguishable from one
+that merely stopped logging. The `[Stream]` line now dumps uncapped counters for the whole chain
+every 600 frames, and behind the church screen all five stages sit frozen at an identical value
+with zero delta while the render loop happily runs another 1.8M frames.
+
+**Pumping from the render loop is not the fix.** It was tried and reverted:
+
+- `sub_8265F720` always reports more work, so the pump never short-circuits.
+- Every pass reaches `sub_8260C318`, which builds a *fresh* IO context with no already-created
+  check, and nothing frees them.
+- At the boot path's 8 pumps/frame that reaches `0x8007000E` (E_OUTOFMEMORY) part-way through the
+  level load. At 1/frame it still leaks roughly 1.7MB/s of guest heap until `BaseHeap::Alloc`
+  cannot find a contiguous range -- at which point the game's own allocations start failing and it
+  freezes with the renderer still drawing the last frame. Observed live: moving the menu selection
+  from New Game to Load Game was enough to tip it over.
+
+So the fix has to come from one of two places: a once-guard so IO contexts are not manufactured per
+call (the same missing check that drops the format-handler registry, see above), or getting the
+game's own IO worker threads to service the queue. The stubs interfere with those threads heavily
+-- handle reuse after 200 real `sub_8260CC50` calls, `KeInitializeSemaphore` preservation,
+`g_skip_thread_creation` -- and that is the more likely real answer.
 
 ### What the boot sequence actually is (2026-09-05)
 

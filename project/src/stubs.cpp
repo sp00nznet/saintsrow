@@ -287,6 +287,9 @@ REX_EXTERN(sub_82648ED8) {
         } \
     }
 
+// Defined below, next to the streaming counters.
+static void PumpStreaming(PPCContext& ctx, uint8_t* base, int max_pumps);
+
 // GameUpdate - the loading state machine
 // Internal state at 0x8371DD7C controls loading flow:
 //   0 = uninitialized (default: skips to done, sets main=3)
@@ -362,16 +365,7 @@ REX_EXTERN(sub_822827B0) {
     // The game's world loading continues in state 3 and needs the
     // streaming system to keep processing file reads.
     {
-        extern void sub_8265F720(PPCContext& ctx, uint8_t* base);
-        for (int pump = 0; pump < 8; pump++) {
-            PPCContext sc_ctx = ctx;
-            sc_ctx.r3.u64 = 0x827A1F24;
-            sc_ctx.r4.u64 = 0x827A1F28;
-            sc_ctx.r5.u64 = 0;
-            sc_ctx.r6.u64 = 0;
-            sub_8265F720(sc_ctx, base);
-            if (sc_ctx.r3.u32 == 0) break;
-        }
+        PumpStreaming(ctx, base, 8);
         static int pump_log = 0;
         if (state_after >= 3 && ++pump_log <= 5) {
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -656,6 +650,40 @@ REX_EXTERN(sub_826FE350) {
     }
 }
 
+// ---- Streaming pump ---------------------------------------------------------
+// StreamCallback (sub_8265F720) dispatches queued IO. It used to be pumped only
+// from the boot state machine (sub_822827B0), which is fine while booting but
+// stops being called once the real game loop takes over -- so after New Game the
+// level load behind the church screen queued work that nothing ever dispatched,
+// and every streaming counter froze. Pump it from the render loop as well, which
+// stays live for the whole session.
+static void PumpStreaming(PPCContext& ctx, uint8_t* base, int max_pumps) {
+    extern void sub_8265F720(PPCContext& ctx, uint8_t* base);
+    for (int i = 0; i < max_pumps; i++) {
+        PPCContext sc = ctx;
+        sc.r3.u64 = 0x827A1F24;
+        sc.r4.u64 = 0x827A1F28;
+        sc.r5.u64 = 0;
+        sc.r6.u64 = 0;
+        sub_8265F720(sc, base);
+        if (sc.r3.u32 == 0) break;   // nothing left to dispatch
+    }
+}
+
+// ---- Uncapped streaming counters --------------------------------------------
+// Every other probe in this file caps its logging, which makes "has this stopped
+// being called?" impossible to answer from a long-running session. These are
+// plain counters dumped periodically from the render loop, so a frozen subsystem
+// shows up as a delta of zero.
+struct StreamCounters {
+    std::atomic<uint32_t> stream_cb{0};   // sub_8265F720 StreamCallback
+    std::atomic<uint32_t> work_find{0};   // sub_8265F4F0 work finder
+    std::atomic<uint32_t> io_comp{0};     // sub_8260C318 IO context create
+    std::atomic<uint32_t> io_ctor{0};     // sub_8260C4F8 IO context ctor
+    std::atomic<uint32_t> io_work{0};     // sub_8260CC50 IO init
+};
+static StreamCounters g_sc;
+
 // Hook sub_82648648 - log ALL null returns and force first item
 extern "C" void __imp__sub_82648648(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_82648648) {
@@ -748,6 +776,40 @@ REX_EXTERN(sub_8262FFE0) {
         REX_STORE_U8(r31_val + 10809, REX_LOAD_U8(r31_val + 10809) | 0x2);
         if (REX_LOAD_U32(r31_val + 20080) == 0)
             REX_STORE_U32(r31_val + 20080, 1);
+    }
+
+    // NOTE: do NOT pump streaming from here. The boot state machine
+    // (sub_822827B0) stops being called once the game loop owns the frame, so
+    // in-game loads queue work that nothing dispatches -- the uncapped [Stream]
+    // counters below show the whole chain frozen behind the church screen. But
+    // pumping from the render loop is not the answer: sub_8265F720 always claims
+    // there is work, and each pass reaches sub_8260C318, which builds a fresh IO
+    // context with no already-created check and nothing to free it. At 8/frame
+    // that hits E_OUTOFMEMORY (0x8007000E) mid-load; at 1/frame it still leaks
+    // ~1.7MB/s of guest heap until BaseHeap::Alloc cannot find a contiguous
+    // range, and the game freezes with the renderer still drawing.
+    //
+    // The real fix is upstream: either a once-guard so IO contexts are not
+    // manufactured per call, or getting the game's own IO worker threads to
+    // service the queue (our stubs interfere with them heavily -- thread reuse,
+    // semaphore preservation, skip-on-reinit).
+
+    // Uncapped streaming telemetry: deltas of zero mean that subsystem stopped.
+    {
+        static uint32_t last[5] = {}, tick = 0;
+        if ((++tick % 600) == 0) {
+            uint32_t now[5] = {g_sc.stream_cb.load(), g_sc.work_find.load(), g_sc.io_comp.load(),
+                               g_sc.io_ctor.load(), g_sc.io_work.load()};
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) {
+                fprintf(f, "[Stream] cb=%u(+%u) find=%u(+%u) comp=%u(+%u) ctor=%u(+%u) work=%u(+%u) state=%u\n",
+                        now[0], now[0] - last[0], now[1], now[1] - last[1], now[2], now[2] - last[2],
+                        now[3], now[3] - last[3], now[4], now[4] - last[4],
+                        REX_LOAD_U32(0x8370DD7C));
+                fclose(f);
+            }
+            for (int i = 0; i < 5; i++) last[i] = now[i];
+        }
     }
 
     // Present every frame with atomic guard.
@@ -1727,6 +1789,7 @@ static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
 // Hook streaming manager callback (sub_8265F720) and work finder (sub_8265F4F0)
 extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8265F4F0) {
+    g_sc.work_find.fetch_add(1, std::memory_order_relaxed);
     uint32_t filter = ctx.r3.u32;
     // Check the pending request count at 0x827A6BC4
     uint32_t req_count = REX_LOAD_U8(0x827A6BC4);
@@ -1742,6 +1805,7 @@ REX_EXTERN(sub_8265F4F0) {
 extern "C" void __imp__sub_8265F720(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8265F720) {
+    g_sc.stream_cb.fetch_add(1, std::memory_order_relaxed);
     static int c = 0;
     c++;
     if (c <= 10) {
@@ -1787,6 +1851,23 @@ REX_EXTERN(sub_82636BB0) {
 // Stub it to return "not ready" (-1) so the caller retries later.
 extern "C" void __imp__sub_8260C318(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8260C318) {
+    g_sc.io_comp.fetch_add(1, std::memory_order_relaxed);
+    // The pump reaches here every frame but rarely gets as far as building an IO
+    // context, so record which status it bails with. Rate-limited, not capped.
+    {
+        static std::atomic<uint32_t> n{0};
+        uint32_t before = g_sc.io_ctor.load(std::memory_order_relaxed);
+        __imp__sub_8260C318(ctx, base);
+        uint32_t seq = n.fetch_add(1, std::memory_order_relaxed);
+        if ((seq % 4000) == 0) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IOComp] #%u ret=0x%08X built_ctx=%d r3=0x%08X r4=0x%08X\n",
+                             seq, ctx.r3.u32,
+                             g_sc.io_ctor.load(std::memory_order_relaxed) != before,
+                             ctx.r3.u32, ctx.r4.u32); fclose(f); }
+        }
+        return;
+    }
     static int c = 0;
     c++;
     // Let the first call through (initial setup)
@@ -1843,6 +1924,7 @@ static bool io_sync_captured = false;
 // Hook sub_8260CC50 - called after IORead, does the actual work
 extern "C" void __imp__sub_8260CC50(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8260CC50) {
+    g_sc.io_work.fetch_add(1, std::memory_order_relaxed);
     static int c = 0;
     if (++c <= 10) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
@@ -2076,6 +2158,7 @@ REX_EXTERN(sub_8260D518) {
 
 extern "C" void __imp__sub_8260C4F8(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8260C4F8) {
+    g_sc.io_ctor.fetch_add(1, std::memory_order_relaxed);
     __imp__sub_8260C4F8(ctx, base);
     uint32_t new_ctx = ctx.r3.u32;
     if (!new_ctx) return;
