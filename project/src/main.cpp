@@ -846,6 +846,15 @@ class SaintsRowApp : public rex::ReXApp {
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
+    // The SDK ships keyboard/mouse controller emulation but leaves it off by
+    // default, so with no gamepad plugged in nothing reaches the guest and the
+    // game sits on the title screen. Default it on -- an explicit --no-mnk_mode
+    // on the command line still wins, since cvar parsing runs before this.
+    if (rex::cvar::GetFlagByName("mnk_mode") != "true") {
+      rex::cvar::SetFlagByName("mnk_mode", "true");
+      REXLOG_INFO("Keyboard/mouse controller emulation enabled (X or Enter = Start, "
+                  "Semicolon or Space = A, Z or Tab = Back, WASD = left stick)");
+    }
   }
 
   // Game data lives in <repo>/extracted, next to the build tree.
@@ -872,4 +881,4 @@ class SaintsRowApp : public rex::ReXApp {
 #endif
 };
 
-REX_DEFINE_APP(saintsrow, SaintsRowApp::Create)
+REX_DEFINE_APP(saintsrow, SaintsRowApp::Create)

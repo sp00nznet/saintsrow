@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: Boots to the main menu -- real input, correct swap format**
+**Status: Playable to the main menu -- New Game reaches the level-load screen**
 
 ![Saints Row Logo Screen](logo.png)
 ![Cathedral Loading Screen](newscreen2.png)
@@ -98,8 +98,8 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Stop clobbering vertex fetch 0 from the swap -- resolve failures 3037 -> 25 per run
 - [x] Clear the tiled bit in the game's own swap packet (fixes the colour cast)
 - [x] Drop the synthetic controller input; the SDK's real SDL input drives the game now
-- [ ] Game sits on the copyright screen after the main menu
-- [ ] The front-end fade (flt_8370D1A4) stalls at 0, so byte_8370DA95 never sets
+- [x] Legal -> FMV -> main menu -> New Game all work, with correct graphics and real input
+- [ ] The level load behind the church screen never starts: the spinner animates but streaming issues no IO
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
@@ -218,6 +218,27 @@ What this does not do is explain why nothing registers record 4. Neither `sub_82
 reachable by an immediate reference to `0x8203B56C` writes these slots. Find the real registrar and
 the fallback goes away.
 
+### What the boot sequence actually is (2026-09-05)
+
+Worth recording, because two earlier sessions guessed wrong: the real order is
+**legal screen -> FMV -> main menu -> New Game -> church/loading screen**. The church screen is the
+*level* load, not part of the boot load. Earlier notes assumed legal -> church, which is why the
+"cathedral loading screen" was treated as a boot-sequence step.
+
+Two corrections were needed to get there, both found by running the game rather than reading logs:
+
+- **Do not clear the tiled bit.** An earlier attempt cleared bit 31 of the swap fetch constant in
+  the game's own packet, on the theory that the framebuffer is linear. It is not: with the bit
+  cleared the texture cache reads tiled data as linear and the image is scrambled beyond
+  recognition. The pre-rebase code cleared it correctly *for a different setup*, where we called
+  IssueSwap ourselves with a hand-made fetch. Now that the game's own swap packet drives the
+  present, its fetch is right as-is -- and with it left alone the graphical errors are gone.
+- **`mnk_mode` defaults to off.** The SDK ships keyboard/mouse controller emulation but does not
+  enable it, so after the synthetic input was removed there was no input path at all with no
+  gamepad plugged in, and the game sat on the title screen. `SaintsRowApp::OnPreSetup` now defaults
+  it on (an explicit `--no-mnk_mode` still wins). X or Enter = Start, Semicolon or Space = A,
+  Z or Tab = Back, WASD = left stick, Shift+arrows = D-pad.
+
 ### Reaching the menu: swap format and real input (2026-09-04)
 
 Two fixes came straight out of watching the game run rather than reading logs.
@@ -322,8 +343,7 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 
 ### Known Issues
 
-- Game reaches the main menu, then cuts to a copyright screen and sits (current top blocker)
-- The front-end fade `flt_8370D1A4` stalls at 0, so `byte_8370DA95` never sets
+- New Game reaches the church screen and stops: the loading spinner animates and the render loop is alive, but the streaming pipeline issues no IO (current top blocker)
 - Screen capture of the D3D12 window from a script comes back black even while the game is visibly rendering; observations come from running it by hand
 - PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch

@@ -1350,26 +1350,14 @@ REX_EXTERN(__imp__VdSwap) {
     // Call the real SDK implementation
     rex::ppc::HostToGuestFunction<rex::kernel::xboxkrnl::VdSwap_entry>(ctx, base);
 
-    // VdSwap has just written its packet into the guest command buffer: a Type0
-    // write of the frontbuffer fetch constant (6 dwords at buf+4) followed by
-    // PM4_XE_SWAP. The fetch it copies from the game's D3D9 texture header has
-    // the tiled bit set, but our framebuffer is linear, so the texture cache
-    // detiles linear data and the colours come out wrong. Clear the bit here,
-    // in the game's own packet, rather than injecting a competing fetch write:
-    // registers 0x4800..0x4805 double as vertex fetch 0, and writing them from
-    // an out-of-band present breaks every later resolve (3037 failures per run).
-    {
-        uint32_t d0 = REX_LOAD_U32(buf_addr + 4);
-        if (d0 & 0x80000000u) {
-            REX_STORE_U32(buf_addr + 4, d0 & ~0x80000000u);
-            static int c = 0;
-            if (++c <= 3) {
-                FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                if (f) { fprintf(f, "[SwapFetch #%d] cleared tiled bit: 0x%08X -> 0x%08X\n",
-                                 c, d0, d0 & ~0x80000000u); fclose(f); }
-            }
-        }
-    }
+    // NOTE: do NOT clear the tiled bit in the fetch constant here. The old
+    // pre-rebase code did (0x8A000002 -> 0x0A000002) and that was right when we
+    // were calling IssueSwap ourselves with a hand-made fetch. Now the game's own
+    // swap packet drives the present, and its framebuffer really is tiled:
+    // clearing the bit makes the texture cache read tiled data as linear and the
+    // image comes out scrambled and unrecognisable. Leave the game's fetch alone.
+    // The remaining colour error is a separate problem (swizzle/format/gamma in
+    // dwords 2..5), not a tiling one.
 
     // After VdSwap writes packets to ring buffer, we need to kick the
     // command processor. The game's ring buffer init (sub_825DAB58) is never
