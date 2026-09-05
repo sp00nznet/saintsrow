@@ -1350,6 +1350,27 @@ REX_EXTERN(__imp__VdSwap) {
     // Call the real SDK implementation
     rex::ppc::HostToGuestFunction<rex::kernel::xboxkrnl::VdSwap_entry>(ctx, base);
 
+    // VdSwap has just written its packet into the guest command buffer: a Type0
+    // write of the frontbuffer fetch constant (6 dwords at buf+4) followed by
+    // PM4_XE_SWAP. The fetch it copies from the game's D3D9 texture header has
+    // the tiled bit set, but our framebuffer is linear, so the texture cache
+    // detiles linear data and the colours come out wrong. Clear the bit here,
+    // in the game's own packet, rather than injecting a competing fetch write:
+    // registers 0x4800..0x4805 double as vertex fetch 0, and writing them from
+    // an out-of-band present breaks every later resolve (3037 failures per run).
+    {
+        uint32_t d0 = REX_LOAD_U32(buf_addr + 4);
+        if (d0 & 0x80000000u) {
+            REX_STORE_U32(buf_addr + 4, d0 & ~0x80000000u);
+            static int c = 0;
+            if (++c <= 3) {
+                FILE* f = fopen("saintsrow_heartbeat.log", "a");
+                if (f) { fprintf(f, "[SwapFetch #%d] cleared tiled bit: 0x%08X -> 0x%08X\n",
+                                 c, d0, d0 & ~0x80000000u); fclose(f); }
+            }
+        }
+    }
+
     // After VdSwap writes packets to ring buffer, we need to kick the
     // command processor. The game's ring buffer init (sub_825DAB58) is never
     // called, so VdInitializeRingBuffer never fires. We must:
@@ -1486,126 +1507,7 @@ REX_EXTERN(sub_825CC5B0) {
     __imp__sub_825CC5B0(ctx, base);
 }
 
-// Stub XamInputGetKeystrokeEx - the SDK's input_system() returns null,
-// causing a crash at NULL+8 in GetKeystroke(). Override the SDK import directly.
-// The func_mapping maps 0x82788EE4 -> __imp__XamInputGetKeystrokeEx,
-// so REX_EXTERN(sub_82788EE4) doesn't intercept calls.
-// Use REX_EXTERN to override the SDK's __imp__XamInputGetKeystrokeEx.
-REX_EXTERN(__imp__XamInputGetKeystrokeEx) {
-    // r3 = user_index_ptr, r4 = flags, r5 = keystroke_ptr
-    // X_INPUT_KEYSTROKE: [+0] u16 virtual_key, [+2] u16 unicode, [+4] u16 flags, [+6] u8 user, [+7] u8 hid
-    uint32_t keystroke_ptr = ctx.r5.u32;
-    if (keystroke_ptr) {
-        for (int i = 0; i < 2; i++) REX_STORE_U32(keystroke_ptr + i*4, 0);
-    }
-    static int call_total = 0;
-    call_total++;
-    uint32_t game_state = REX_LOAD_U32(0x8370DD7C);
-    if (call_total <= 5 || (game_state >= 3 && call_total <= 50)) {
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[GetKeystrokeEx #%d] state=%u r3=0x%08X r4=0x%08X r5=0x%08X\n",
-            call_total, game_state, ctx.r3.u32, ctx.r4.u32, keystroke_ptr); fclose(f); }
-    }
-
-    // After loading (state >= 3), inject button presses to navigate past attract mode
-    if (game_state >= 3 && keystroke_ptr) {
-        static int ks_frame = 0;
-        ks_frame++;
-        // Simulate Start press at frame 100, A press at frame 300
-        // Each press needs KEYDOWN then KEYUP
-        uint16_t vk = 0;
-        uint16_t flags = 0;
-        if (ks_frame == 100 || ks_frame == 500 || ks_frame == 900) {
-            vk = 0x5814; // VK_PAD_START
-            flags = 0x0001; // KEYDOWN
-        } else if (ks_frame == 105 || ks_frame == 505 || ks_frame == 905) {
-            vk = 0x5814; // VK_PAD_START
-            flags = 0x0002; // KEYUP
-        } else if (ks_frame == 300 || ks_frame == 700 || ks_frame == 1100) {
-            vk = 0x5800; // VK_PAD_A
-            flags = 0x0001; // KEYDOWN
-        } else if (ks_frame == 305 || ks_frame == 705 || ks_frame == 1105) {
-            vk = 0x5800; // VK_PAD_A
-            flags = 0x0002; // KEYUP
-        }
-        if (vk) {
-            REX_STORE_U16(keystroke_ptr + 0, vk);
-            REX_STORE_U16(keystroke_ptr + 2, 0);  // unicode
-            REX_STORE_U16(keystroke_ptr + 4, flags);
-            REX_STORE_U8(keystroke_ptr + 6, 0);   // user_index
-            REX_STORE_U8(keystroke_ptr + 7, 0);   // hid_code
-            static int key_c = 0;
-            if (++key_c <= 20) {
-                FILE* f = fopen("saintsrow_heartbeat.log", "a");
-                if (f) { fprintf(f, "[Keystroke] frame=%d vk=0x%04X flags=0x%04X\n",
-                    ks_frame, vk, flags); fclose(f); }
-            }
-            ctx.r3.u64 = 0; // X_ERROR_SUCCESS
-            return;
-        }
-    }
-
-    ctx.r3.u64 = 0x80070002; // X_ERROR_EMPTY (no keystroke, device connected)
-}
-
-// Stub XamInputSetState - also crashes on null input_system()
-REX_EXTERN(__imp__XamInputSetState) {
-    ctx.r3.u64 = 0x80070481; // X_ERROR_DEVICE_NOT_CONNECTED
-}
-
-// Stub XamInputGetState - return connected controller for player 0.
-// After loading completes, simulate button presses to skip attract mode.
-// XINPUT_STATE layout (big-endian):
-//   [+0] uint32 dwPacketNumber
-//   [+4] uint16 wButtons   (XINPUT_GAMEPAD_START=0x0010, GAMEPAD_A=0x1000)
-//   [+6] uint8  bLeftTrigger
-//   [+7] uint8  bRightTrigger
-//   [+8..15] thumbsticks (int16 x4)
 static std::atomic<int> g_input_frame{0};
-REX_EXTERN(__imp__XamInputGetState) {
-    uint32_t user = ctx.r3.u32;
-    uint32_t state_ptr = ctx.r5.u32;
-    static int gs_call = 0;
-    gs_call++;
-    if (gs_call <= 5 || gs_call % 500 == 0) {
-        FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[XamInputGetState #%d] user=%u state_ptr=0x%08X\n", gs_call, user, state_ptr); fclose(f); }
-    }
-    if (user != 0) {
-        ctx.r3.u64 = 0x80070481; // NOT_CONNECTED for users 1-3
-        return;
-    }
-    // Zero the struct first
-    if (state_ptr) {
-        for (int i = 0; i < 8; i++) REX_STORE_U32(state_ptr + i*4, 0);
-    }
-    // Return connected controller and simulate button presses after loading
-    uint32_t game_state = REX_LOAD_U32(0x8370DD7C);
-    if (user == 0 && state_ptr) {
-        int frame = g_input_frame.fetch_add(1);
-        // Log first few post-load calls
-        static int log_u0 = 0;
-        if (game_state >= 3 && ++log_u0 <= 5) {
-            FILE* f = fopen("saintsrow_heartbeat.log", "a");
-            if (f) { fprintf(f, "[InputState] user=0 frame=%d state=%u ptr=0x%08X\n", frame, game_state, state_ptr); fclose(f); }
-        }
-        // Continuously press Start button to skip attract mode
-        // and A button to confirm menu selections
-        if (game_state >= 3) {
-            // Alternate: Start for 10 frames, nothing for 20, A for 10, nothing for 20
-            int cycle = frame % 60;
-            uint16_t buttons = 0;
-            if (cycle < 10) buttons = 0x0010;     // START
-            else if (cycle >= 30 && cycle < 40) buttons = 0x1000;  // A
-            if (buttons) {
-                REX_STORE_U16(state_ptr + 4, buttons);
-            }
-            // Always set packet number
-            REX_STORE_U32(state_ptr, (uint32_t)frame);
-        }
-    }
-    ctx.r3.u64 = 0; // X_ERROR_SUCCESS (connected)
-}
 
 // Hook NtAllocateVirtualMemory to log failures (BaseHeap::Alloc page count too big)
 extern "C" void __imp__NtAllocateVirtualMemory(PPCContext& ctx, uint8_t* base);
@@ -1820,6 +1722,19 @@ static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
     }
     return ok;
 }
+
+// ---- Input ------------------------------------------------------------------
+//
+// There used to be XamInputGetState / XamInputGetKeystrokeEx / XamInputSetState
+// overrides here that synthesised a START/A button cycle to walk the game past
+// attract mode on its own. They worked -- too well: the fake presses skipped the
+// cathedral loading screen, drove straight through the main menu, and then sat
+// mashing buttons at the copyright screen.
+//
+// SDK 0.10 ships a real input system (SDL gamepad plus keyboard/mouse) and
+// ReXApp attaches the window to it, so the SDK's own implementations are used
+// now and the game responds to actual input. See git history for the synthetic
+// versions if a scripted walkthrough is ever wanted for automated testing.
 
 // Hook streaming manager callback (sub_8265F720) and work finder (sub_8265F4F0)
 extern "C" void __imp__sub_8265F4F0(PPCContext& ctx, uint8_t* base);

@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: Runs stably in the game loop -- draws and resolves mostly succeed, screen still black**
+**Status: Boots to the main menu -- real input, correct swap format**
 
 ![Saints Row Logo Screen](logo.png)
 ![Cathedral Loading Screen](newscreen2.png)
@@ -96,7 +96,9 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Survive unregistered indirect calls instead of aborting (SDK patch) -- runs 50s+ instead of ~15s
 - [x] Restore presentation over the ring buffer (host-submitted PM4_XE_SWAP)
 - [x] Stop clobbering vertex fetch 0 from the swap -- resolve failures 3037 -> 25 per run
-- [ ] Framebuffer at 0x09258000 still reads all zeros, so the screen is black
+- [x] Clear the tiled bit in the game's own swap packet (fixes the colour cast)
+- [x] Drop the synthetic controller input; the SDK's real SDL input drives the game now
+- [ ] Game sits on the copyright screen after the main menu
 - [ ] The front-end fade (flt_8370D1A4) stalls at 0, so byte_8370DA95 never sets
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
@@ -216,6 +218,26 @@ What this does not do is explain why nothing registers record 4. Neither `sub_82
 reachable by an immediate reference to `0x8203B56C` writes these slots. Find the real registrar and
 the fallback goes away.
 
+### Reaching the menu: swap format and real input (2026-09-04)
+
+Two fixes came straight out of watching the game run rather than reading logs.
+
+**The colour cast is the tiled bit, cleared in the right place.** `VdSwap` copies the frontbuffer
+fetch constant out of the game's D3D9 texture header, and that header has the tiled bit set. Our
+framebuffer is linear, so the texture cache detiles linear data and the colours come out wrong.
+The fix is to clear bit 31 of the fetch's first dword *in the game's own swap packet*, right after
+`VdSwap_entry` writes it into the guest command buffer -- not by injecting a competing fetch write
+from an out-of-band present, which is what broke every resolve (see above).
+
+**The synthetic input had to go.** The stubs used to override `XamInputGetState`,
+`XamInputGetKeystrokeEx` and `XamInputSetState` to fake a repeating START/A button cycle so the
+game would walk itself past attract mode. That explained three things at once: the cathedral
+loading screen never appeared (START skipped it), the game went straight to the main menu (A
+navigated it), and it then sat mashing buttons at the copyright screen. SDK 0.10 ships a working
+input system -- SDL gamepad plus keyboard and mouse -- and `ReXApp` attaches the window to it, so
+the overrides are gone and the game now responds to real input. The synthetic versions are in git
+history if a scripted walkthrough is ever wanted for automated testing.
+
 ### Running stably, and the vertex-fetch clobber (2026-09-04)
 
 Three changes took the game from aborting after ~15s to running indefinitely in the game loop.
@@ -300,8 +322,9 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 
 ### Known Issues
 
-- Framebuffer at `0x09258000` reads all zeros -- the screen is black despite draws succeeding (current top blocker)
+- Game reaches the main menu, then cuts to a copyright screen and sits (current top blocker)
 - The front-end fade `flt_8370D1A4` stalls at 0, so `byte_8370DA95` never sets
+- Screen capture of the D3D12 window from a script comes back black even while the game is visibly rendering; observations come from running it by hand
 - PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
 - Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)
