@@ -89,7 +89,8 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Root-caused the post-boot crash to a re-entrant IO-init null deref (see below)
 - [x] Rebase onto ReXGlue SDK 0.10.0 (manifest codegen, ReXApp, GPU plugin)
 - [x] Boot past the 151-item content queue: state 1 -> 2 -> 3, front-end .xtbl loading starts
-- [ ] Fix null virtual call in front-end init (sub_82105FE8, see below)
+- [x] Trace the front-end-init abort to a missing IO format handler; fix the slot-3 loss
+- [ ] Find what should register handler slot 4 (front-end init ordering)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
@@ -157,11 +158,51 @@ must skip `LookupHeap(base)->Reset()`, which wipes the function dispatcher's all
 `.xtbl` tables (`death_faces`, `focused_audio`, `voice_distances`, `reverb`, ...). The old top
 blocker -- the re-entrant IO-init crash loop -- no longer fires.
 
-**Current blocker.** `sub_82105FE8` iterates a list at `[r26+8]` and makes a virtual call on
-each entry. The entry is null (`r3 = 0`), so the vtable read returns garbage and the call
-target is `0x0000000F`. The list slot is populated from `sub_8260F990`, which creates an object
-through `sub_82623250(0x61820006, &out)` -- a type-ID class factory. Something in that creation
-path fails and leaves the slot null.
+**Current blocker, traced end to end.** `sub_82105FE8` iterates a list at `[r26+8]` and makes a
+virtual call on each entry. The entry is null, so the vtable read returns garbage and the call
+target is `0x0000000F`. Walking it back:
+
+```
+sub_82105FE8   virtual-calls a null list entry                -> abort, target 0x0000000F
+  <- slot filled only when sub_8260F990 returns >= 0 (the game never checks)
+sub_8260F990   returns 0x80004001 (E_NOTIMPL)
+sub_826243D8   returns 0x80004001 from its vtable call
+sub_82610168   answers E_NOTIMPL when the handler lookup comes back null
+sub_8260FF68   handler-registry lookup misses
+```
+
+`sub_8260FF68(registry, idx)` resolves an IO format handler: `idx <= 127` indexes the table at
+`[registry+12]` bounded by `[registry+8]`, higher indices use `[registry+20]`/`[registry+16]`, and
+an 8-byte entry counts as registered only when both dwords are non-zero. The registry hangs off
+the current IO context (`[ctx+60] - 8`), and `sub_8260C4F8` installs a brand-new context at
+`dword_837102B4` on **every** IO-context create -- so the "current" registry is replaced constantly.
+
+Dumping the registry around IO init shows what that costs:
+
+| context | slots filled by `sub_8260CC50` |
+| --- | --- |
+| first | 0, 1, 2, **3** |
+| every later one | 0, 1, 2 |
+
+Two separate defects fall out of that:
+
+- **Slot 3 was being lost.** It is registered once, alongside the first IO init, and every
+  subsequent context came up without it. Fixed: `sub_8260FF68` now remembers every registry it has
+  seen and, on a miss, resolves against one that still has the slot. Entries are pointers to static
+  handler descriptors, so serving one from an older table is safe. Confirmed working in the log
+  (`[IOReg] idx=3 missed on ..., served from ...`).
+- **Slot 4 is never registered at all** -- not on the first context, not on any later one. Its
+  handler pair (`0x821071F8`/`0x82107208`) sits in the static descriptor list at `0x8203B59C`, in
+  the same address range as the front-end code that needs it, which points at an ordering problem:
+  the front-end looks the handler up before whatever installs it has run. That is the open thread.
+
+Two approaches were tried and rejected on evidence: reusing the first IO context instead of letting
+`sub_8260C4F8` build new ones does remove the abort, but the streaming queue then stops draining
+(the contexts really are per-request); and replaying registrations through `sub_8260D518` records
+nothing, because IO init populates the table directly rather than going through that registrar.
+
+A `SIGABRT` handler dumping the aborting guest thread's `PPCContext` is what made this tractable --
+`REX_FATAL` otherwise vanishes into `std::abort()` with no guest call site.
 
 **Presentation regression.** Removing the forced `IssueSwap` exposed a malformed PM4 stream:
 the CP reports `ExecutePacketType0 overflow` on the indirect buffers our `sub_825D3580` hook
@@ -180,7 +221,7 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 
 ### Known Issues
 
-- Null virtual call in front-end init (`sub_82105FE8`) aborts the game (current top blocker)
+- IO format handler slot 4 is never registered, so front-end init aborts (current top blocker)
 - PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
 - Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)
