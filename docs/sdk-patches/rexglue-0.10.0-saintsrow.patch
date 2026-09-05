@@ -1,0 +1,153 @@
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index a744375..d39c4e0 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -636,6 +636,13 @@ uint32_t CommandProcessor::ExecutePrimaryBuffer(uint32_t read_index, uint32_t wr
+ void CommandProcessor::ExecuteIndirectBuffer(uint32_t ptr, uint32_t count) {
+   SCOPE_profile_cpu_f("gpu");
+ 
++  // A zero-length indirect buffer has no packets. RingBuffer with capacity 0
++  // makes set_write_offset() do `% 0` (integer #DE). Real hardware tolerates
++  // empty IBs; bail out.
++  if (count == 0) {
++    return;
++  }
++
+   // Execute commands!
+   memory::RingBuffer reader(memory_->TranslatePhysical(ptr), count * sizeof(uint32_t));
+   reader.set_write_offset(count * sizeof(uint32_t));
+@@ -650,6 +657,10 @@ void CommandProcessor::ExecuteIndirectBuffer(uint32_t ptr, uint32_t count) {
+ }
+ 
+ void CommandProcessor::ExecutePacket(uint32_t ptr, uint32_t count) {
++  // Empty packet stream: capacity 0 would crash set_write_offset (`% 0`).
++  if (count == 0) {
++    return;
++  }
+   // Execute commands!
+   memory::RingBuffer reader(memory_->TranslatePhysical(ptr), count * sizeof(uint32_t));
+   reader.set_write_offset(count * sizeof(uint32_t));
+diff --git a/src/system/function_dispatcher.cpp b/src/system/function_dispatcher.cpp
+index bd43109..4330f0b 100644
+--- a/src/system/function_dispatcher.cpp
++++ b/src/system/function_dispatcher.cpp
+@@ -15,6 +15,9 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/dbg.h>
++#include <mutex>
++#include <set>
++
+ #include <rex/logging.h>
+ #include <rex/perf/counter.h>
+ #include <rex/memory.h>
+@@ -34,9 +37,27 @@ FunctionDispatcher* GetBoundFunctionDispatcher() {
+ 
+ }  // namespace
+ 
++// NOTE(sp00nznet): non-fatal for in-progress recomps. A guest indirect call can
++// land on an address codegen never emitted an entry point for -- typically a small
++// function only virtual dispatch reaches, which the scanner folded into its
++// neighbour. Aborting turns each one into a separate build/run cycle to discover
++// the next; returning instead lets a single run report every missing address so
++// they can be added to the manifest in one pass. Each (target, lr) pair is logged
++// once. Revert to REX_FATAL once the manifest is complete.
+ static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* /*base*/) {
+-  REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X}",
+-            ctx.last_indirect_target);
++  static std::mutex seen_mutex;
++  static std::set<uint64_t> seen;
++  uint64_t key = (uint64_t(ctx.last_indirect_target) << 32) | uint32_t(ctx.lr);
++  bool first;
++  {
++    auto lock = std::lock_guard(seen_mutex);
++    first = seen.insert(key).second;
++  }
++  if (first) {
++    REXCPU_ERROR("Call to invalid or unregistered function at guest address 0x{:08X} (from lr 0x{:08X})",
++                 ctx.last_indirect_target, uint32_t(ctx.lr));
++  }
++  ctx.r3.u64 = 0;
+ }
+ 
+ PPCFunc* ResolveIndirectFunction(uint32_t guest_address) {
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+index 0726516..16b7677 100644
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -460,7 +460,11 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_k
+     return 0;
+   }
+ 
+-  memory()->LookupHeap(base_address_)->Reset();
++  // NOTE(sp00nznet): skipped for static recomp. Reset() clears page-table
++  // entries for the whole 0x80000000-0x8FFFFFFF heap, destroying the function
++  // dispatcher allocation at image_end and the .rdata/.pdata page tracking.
++  // We load exactly one module, so there is no stale state to clear.
++  // memory()->LookupHeap(base_address_)->Reset();
+ 
+   aes_decrypt_buffer(use_dev_key ? xe_xex2_devkit_key : xe_xex2_retail_key,
+                      reinterpret_cast<const uint8_t*>(xex_security_info()->aes_key), 16,
+diff --git a/src/system/xobject.cpp b/src/system/xobject.cpp
+index d358f39..9532e16 100644
+--- a/src/system/xobject.cpp
++++ b/src/system/xobject.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <unordered_map>
+ #include <vector>
+ 
+ #include <rex/chrono/clock.h>
+@@ -388,14 +389,40 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state, void* na
+     as_type = header->type;
+   }
+ 
++  // NOTE(sp00nznet): guest addresses we have already associated with an object.
++  // The comment above assumes PPC code never pokes the struct, but some titles
++  // re-initialise dispatch headers inline -- Saints Row does it to its IO event
++  // and semaphore between every wait. That wipes the signature, so the branch
++  // below would mint a brand new object each time: measured 201 distinct native
++  // objects for one guest event, every IO worker parked on its own private copy,
++  // and no signal able to reach any of them. Remembering the handle lets us
++  // re-attach instead of duplicating.
++  static std::unordered_map<uint32_t, uint32_t> associated_handles;
++  uint32_t guest_address = kernel_state->memory()->HostToGuestVirtual(native_ptr);
++
+   if (header->wait_list_flink == kXObjSignature) {
+     // Already initialized.
+     // TODO: assert if the type of the object != as_type
+     uint32_t handle = header->wait_list_blink;
+     auto object = kernel_state->object_table()->LookupObject<XObject>(handle);
+ 
++    if (object && guest_address) {
++      associated_handles[guest_address] = handle;
++    }
+     // TODO(benvanik): assert nothing has been changed in the struct.
+     return object;
++  } else if (auto it = associated_handles.find(guest_address);
++             guest_address && it != associated_handles.end()) {
++    // The guest cleared our signature by re-initialising the header in place.
++    // Re-attach the object it was already using rather than creating another.
++    auto object = kernel_state->object_table()->LookupObject<XObject>(it->second);
++    if (object) {
++      header->wait_list_flink = kXObjSignature;
++      header->wait_list_blink = it->second;
++      return object;
++    }
++    associated_handles.erase(it);
++    return GetNativeObject(kernel_state, native_ptr, as_type);
+   } else {
+     // First use, create new.
+     // https://www.nirsoft.net/kernel_struct/vista/KOBJECTS.html
+@@ -444,6 +471,9 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state, void* na
+     // FIXME: This assumes the object contains a dispatch header (some don't!)
+     StashHandle(header, object->handle());
+ 
++    if (object && guest_address) {
++      associated_handles[guest_address] = object->handle();
++    }
+     return object_ref<XObject>(object);
+   }
+ }

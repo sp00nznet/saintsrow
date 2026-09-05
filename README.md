@@ -102,7 +102,8 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Diagnose the church-screen stall: streaming is pumped only from the boot state machine
 - [x] Follow the game's frontbuffer rotation in the forced present (fixes the 3-frame flicker)
 - [x] Locate the in-game stall: IO workers park on a semaphore that is signalled but never consumed
-- [ ] Fix the IO worker/semaphore object mismatch so queued work actually drains
+- [x] Fix the guest/native object duplication: 201 native objects for one guest event, now 1
+- [ ] Find who should signal the IO event -- nothing ever does, so the workers still never wake
 - [ ] Load Game halts on a null deref: XamShowDeviceSelectorUI is always headless (see below)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
@@ -161,7 +162,9 @@ Moved from ReXGlue 0.7.0 to 0.10.0 (321 upstream commits). What changed on our s
   A `SIGABRT` handler now dumps the aborting guest thread's `PPCContext`, so an invalid
   indirect call reports its exact call site (`lr`) and target.
 
-Two SDK patches are still required on top of v0.10.0 and are re-applied to the source tree:
+SDK patches live in `docs/sdk-patches/rexglue-0.10.0-saintsrow.patch` (the SDK tree itself is
+gitignored). Apply with `git apply` inside `tools/rexglue-sdk` at tag `v0.10.0`. Two of them are
+required to boot at all:
 `CommandProcessor::ExecuteIndirectBuffer`/`ExecutePacket` need a `count == 0` guard (a
 zero-capacity `RingBuffer` divides by zero in `set_write_offset`), and `XexModule::ReadImage`
 must skip `LookupHeap(base)->Reset()`, which wipes the function dispatcher's allocation.
@@ -249,6 +252,32 @@ useful, and dereferences a null: `Call to invalid or unregistered function at gu
 0x0000000F (from lr 0x820FA6E8)`, followed by an unhandled guest access violation.
 
 Avoid Load Game for now. New Game is unaffected and is the path that matters.
+
+### One guest event, 201 native objects (2026-09-05)
+
+Instrumenting the SDK's `xeKeWaitForSingleObject` to log the *resolved* `XObject` for the IO sync
+addresses gave the answer immediately: **201 distinct native objects for the single guest event at
+`0x832AD680`**. Every IO worker was parked on its own private event.
+
+`XObject::GetNativeObject` ties a guest dispatch header to its native object by writing
+`kXObjSignature` (`'REX '`) into `wait_list_flink` and the handle into `wait_list_blink`. Its own
+comment notes the XDK inlines some `KeInitialize` calls, and assumes "all other calls (Set/Reset/
+Wait/etc) are used and we don't have to worry about PPC code poking the struct". Saints Row breaks
+that assumption: it re-initialises the IO event and semaphore headers in place, wiping the
+signature, so every subsequent wait fell into the "first use, create new" branch.
+
+The fix (in `docs/sdk-patches/`) remembers the handle per guest address and re-attaches it when the
+signature has been cleared, instead of minting another object. That takes it from 201 objects to 1.
+
+Re-arming from the render loop was tried first and is not enough -- the game clobbers and waits many
+times between frames, so the association has to be restored at the point of use, not on a timer.
+
+**Still stalled, for a second and separate reason.** With one shared event, the probe shows *zero*
+signals delivered to it: no `KeSetEvent` on `0x832AD680`, no `KeReleaseSemaphore` on `0x832AD66C`.
+(The `sem_state=2` seen earlier is not a real signal either -- it is the `KeInitializeSemaphore`
+override writing a count of 2 directly.) So the workers now correctly share one event that nothing
+ever sets. The next question is which guest path is supposed to signal it, and why the in-game load
+never reaches it.
 
 ### The IO workers are parked on a semaphore nobody wakes them from (2026-09-05)
 
