@@ -805,15 +805,20 @@ REX_EXTERN(sub_8262FFE0) {
     // Uncapped streaming telemetry: deltas of zero mean that subsystem stopped.
     {
         static uint32_t last[5] = {}, tick = 0;
-        if ((++tick % 600) == 0) {
+        if ((++tick % 60) == 0) {   // fine-grained: the loop can stall within a few hundred frames
             uint32_t now[5] = {g_sc.stream_cb.load(), g_sc.work_find.load(), g_sc.io_comp.load(),
                                g_sc.io_ctor.load(), g_sc.io_work.load()};
             FILE* f = fopen("saintsrow_heartbeat.log", "a");
             if (f) {
-                fprintf(f, "[Stream] cb=%u(+%u) find=%u(+%u) comp=%u(+%u) ctor=%u(+%u) work=%u(+%u) state=%u\n",
+                // 0x832AD66C = IO semaphore, 0x832AD680 = IO event; +4 is
+                // signal_state in the guest dispatch header.
+                fprintf(f, "[Stream] cb=%u(+%u) find=%u(+%u) comp=%u(+%u) ctor=%u(+%u) work=%u(+%u) "
+                           "state=%u sem_state=%d evt_state=%d\n",
                         now[0], now[0] - last[0], now[1], now[1] - last[1], now[2], now[2] - last[2],
                         now[3], now[3] - last[3], now[4], now[4] - last[4],
-                        REX_LOAD_U32(0x8370DD7C));
+                        REX_LOAD_U32(0x8370DD7C),
+                        (int32_t)REX_LOAD_U32(0x832AD66C + 4),
+                        (int32_t)REX_LOAD_U32(0x832AD680 + 4));
                 fclose(f);
             }
             for (int i = 0; i < 5; i++) last[i] = now[i];
@@ -2543,4 +2548,3 @@ REX_EXTERN(sub_82610168) {
                          c, self, desc, idx, ctx.r3.u32); fclose(f); }
     }
 }
-

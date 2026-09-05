@@ -101,7 +101,8 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Legal -> FMV -> main menu -> New Game all work, with correct graphics and real input
 - [x] Diagnose the church-screen stall: streaming is pumped only from the boot state machine
 - [x] Follow the game's frontbuffer rotation in the forced present (fixes the 3-frame flicker)
-- [ ] Dispatch queued IO in-game without leaking IO contexts (see below)
+- [x] Locate the in-game stall: IO workers park on a semaphore that is signalled but never consumed
+- [ ] Fix the IO worker/semaphore object mismatch so queued work actually drains
 - [ ] Load Game halts on a null deref: XamShowDeviceSelectorUI is always headless (see below)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
@@ -248,6 +249,31 @@ useful, and dereferences a null: `Call to invalid or unregistered function at gu
 0x0000000F (from lr 0x820FA6E8)`, followed by an unhandled guest access violation.
 
 Avoid Load Game for now. New Game is unaffected and is the path that matters.
+
+### The IO workers are parked on a semaphore nobody wakes them from (2026-09-05)
+
+Uncapped telemetry from the render loop, sampled while sitting on the church screen, reads:
+
+```
+[Stream] cb=10281(+0) find=10281(+0) comp=10281(+0) ctor=10281(+0) work=10281(+0)
+         state=3 sem_state=2 evt_state=0
+```
+
+`sem_state=2` is the signal count of the IO semaphore at `0x832AD66C`. So the game **has** queued
+work and **has** signalled the semaphore -- two units are available and nothing consumes them. The
+watchdog thread sampler shows dozens of guest threads alive, all parked in `ntdll` waiting.
+
+That is the stale-object mismatch the `KeInitializeSemaphore` override was written to prevent:
+the game reinitialises the semaphore, a new native object is associated with the guest memory, and
+the worker threads created earlier are still blocked on the *previous* object. The override
+preserves the handle across re-init, but the evidence says a mismatch still happens somewhere -- a
+signalled semaphore with a queue behind it and dozens of permanently parked workers is exactly that
+shape.
+
+So the level load never starts not because nothing is queued, and not because the dispatcher is not
+called, but because the workers that would drain the queue are waiting on the wrong object. That is
+the thing to fix next, and it sits squarely in the stubs' IO thread handling: `g_skip_thread_creation`,
+the handle reuse after 200 real `sub_8260CC50` calls, and the `KeInitializeSemaphore` preservation.
 
 ### Why the level load behind the church screen does nothing (2026-09-05)
 
