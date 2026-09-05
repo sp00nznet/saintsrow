@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: Rebased on ReXGlue SDK 0.10.0 -- boots past the loading queue into front-end init**
+**Status: Front-end init completes -- the game loop runs and issues draw calls**
 
 ![Saints Row Logo Screen](logo.png)
 ![Cathedral Loading Screen](newscreen2.png)
@@ -89,8 +89,12 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Root-caused the post-boot crash to a re-entrant IO-init null deref (see below)
 - [x] Rebase onto ReXGlue SDK 0.10.0 (manifest codegen, ReXApp, GPU plugin)
 - [x] Boot past the 151-item content queue: state 1 -> 2 -> 3, front-end .xtbl loading starts
-- [x] Trace the front-end-init abort to a missing IO format handler; fix the slot-3 loss
-- [ ] Find what should register handler slot 4 (front-end init ordering)
+- [x] Trace the front-end-init abort to a missing IO format handler and unblock it
+- [x] Register the vtable-only entry points codegen folds into neighbouring functions
+- [x] **Front-end init completes** -- byte_8370DA94 sets, the 500ms fade runs, the main loop enters sub_82186C10
+- [x] Game loop cycles (GameLoop2 / GL2_Init / GL2_World / GL2_Spawn) and the GPU receives PM4_DRAW_INDX
+- [ ] Fix the next null-vtable dispatch (sub_82693AD0 region)
+- [ ] Nothing lands in the sampled framebuffer yet (all-zero pixels)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
@@ -196,6 +200,40 @@ Two separate defects fall out of that:
   the same address range as the front-end code that needs it, which points at an ordering problem:
   the front-end looks the handler up before whatever installs it has run. That is the open thread.
 
+**Unblocked (2026-09-04, later).** `sub_8260FF68` now answers a miss from the image's own
+master handler list at `0x8203B56C`: five 12-byte `{a, b, n}` records whose `{a, b}` pairs are
+exactly, in order, registry slots 0..4. Slots 0..3 match what IO init installs; record 4 is the
+one nothing ever registers. Because a record's first two dwords have the same layout as a registry
+entry, the record's own guest address can be handed back as the entry. That resolves both the lost
+slot 3 and the never-registered slot 4, and front-end init runs to completion:
+`byte_8370DA94` sets, the 500ms fade advances, and the main loop enters the real game loop.
+
+What this does not do is explain why nothing registers record 4. Neither `sub_82604D10` /
+`sub_8260D518` (hooking it shows the handler table unchanged across the call) nor anything
+reachable by an immediate reference to `0x8203B56C` writes these slots. Find the real registrar and
+the fallback goes away.
+
+### Vtable-only entry points (2026-09-04)
+
+Past front-end init the game started aborting on calls to *plausible* code addresses
+(`0x82277408`, `0x82277418`, `0x824EAED8`). These are small functions that only virtual dispatch
+reaches, so codegen never sees a call and folds them into whatever function precedes them. Two
+scans now feed the manifest:
+
+- **Tail-call trampolines** -- `lwz r11,0(rX); ...; mtctr r11; bctr` starting right after a
+  blr/bctr and lying inside an already-emitted function. The XEX import thunk table
+  (`{0x01<mod><ord>, 0x02<mod><ord>, mtctr, bctr}`, 230 of them) matches the same shape and must be
+  skipped -- splitting those breaks the link with undefined `sub_827888xx` symbols.
+- **Small vtable leaves** -- addresses appearing in a run of >= 4 consecutive code pointers (a
+  vtable) that start after a terminator and reach their own blr/bctr within 16 instructions.
+
+Both need a split-safety check: a split at S is only valid when nothing in `[host, S)` branches to
+`>= S` and nothing in `[S, end)` branches to `< S`, or the two halves reference each other's labels
+and the generated code will not compile. That check rejects 193 of 280 candidates, and one more
+(`sub_826445E8`, reached through a jump table the check cannot see) had to be dropped from the
+build error. Declaring *every* vtable slot instead -- all 3743 -- splits functions mid-flow and
+breaks game init before the first frame.
+
 Two approaches were tried and rejected on evidence: reusing the first IO context instead of letting
 `sub_8260C4F8` build new ones does remove the abort, but the streaming queue then stops draining
 (the contexts really are per-request); and replaying registrations through `sub_8260D518` records
@@ -221,7 +259,8 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 
 ### Known Issues
 
-- IO format handler slot 4 is never registered, so front-end init aborts (current top blocker)
+- Null-vtable dispatch after front-end init (`lr=0x82693AD0`, target `0x0F`) -- current top blocker
+- Sampled framebuffer reads all zeros, so draws are not landing where we look
 - PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
 - Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)

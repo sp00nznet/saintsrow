@@ -2346,85 +2346,49 @@ REX_EXTERN(sub_82105FE8) {
     }
 }
 
-// ---- IO format-handler lookup: survive context swaps ------------------------
+// ---- IO format-handler lookup: fall back to the image's master list --------
 //
-// sub_8260FF68(registry, idx) resolves a format handler:
-//   idx <= 127 -> table [registry+12], bound [registry+8]
-//   idx >  127 -> table [registry+20], bound [registry+16], idx -= 128
-// An 8-byte entry counts as registered only when both dwords are non-zero.
+// sub_8260FF68(registry, idx) resolves an IO format handler: idx <= 127 indexes
+// the table at [registry+12] bounded by [registry+8], higher indices use
+// [registry+20]/[registry+16]. An 8-byte {a, b} entry counts as registered only
+// when both dwords are non-zero.
 //
-// The registry hangs off the current IO context ([ctx+60]-8) and sub_8260C4F8
-// installs a brand-new context at dword_837102B4 on every IO-context create.
-// IO init re-registers handlers 0..2 on each new context, but the later ones are
-// registered once during startup, so after the first swap a lookup for 3 misses.
-// sub_82610168 then answers E_NOTIMPL, sub_8260F990 propagates it, and
-// sub_82105FE8 virtual-calls the null it was left with -- the 0x0000000F abort.
+// The registry hangs off the current IO context ([ctx+60]-8), and sub_8260C4F8
+// installs a brand-new context at dword_837102B4 on every IO-context create, so
+// the live registry is replaced constantly. Dumping it around IO init shows
+// sub_8260CC50 filling slots 0..2 on every context but slot 3 only on the first,
+// and slot 4 on none of them. A miss then makes sub_82610168 answer E_NOTIMPL,
+// sub_8260F990 propagates it, and sub_82105FE8 is left virtual-calling the null
+// it was handed -- the "target 0x0000000F" abort.
 //
-// Every caller funnels through this lookup, so one fallback here covers them all:
-// on a miss, resolve against the first registry we ever saw, which still holds
-// the full set. Entries are pointers to static handler descriptors, so handing
-// back one from the older table is safe.
+// The image carries the master list at 0x8203B56C: five 12-byte {a, b, n}
+// records whose {a, b} pairs are exactly, in order, the registry slots 0..4.
+// Slots 0..3 match what IO init installs; record 4 is the one nothing ever
+// registers. Because the record's first two dwords have the same layout as a
+// registry entry, a miss can be answered with the record's own guest address.
 //
-// ponytail: fallback rather than re-registering on each new context, because the
-// registrar that populates these tables from the descriptor list at 0x8203B56C
-// is not sub_8260D518 (hooking that records nothing). If the real registrar turns
-// up, replaying it on construction is the tidier fix.
-// Registries seen so far. Handlers land on whichever context was current when
-// they were registered, so a miss on today's context may still be satisfiable
-// from an earlier one.
-static constexpr int IO_REG_MAX = 64;
-static uint32_t g_io_registries[IO_REG_MAX] = {};
-static int g_io_registry_count = 0;
-
-// Resolve idx against one registry exactly the way sub_8260FF68 does.
-static uint32_t IoRegLookup(uint8_t* base, uint32_t reg, uint32_t idx) {
-    uint32_t bound, table;
-    if (idx <= 127) {
-        bound = REX_LOAD_U32(reg + 8);
-        table = REX_LOAD_U32(reg + 12);
-    } else {
-        idx -= 128;
-        bound = REX_LOAD_U32(reg + 16);
-        table = REX_LOAD_U32(reg + 20);
-    }
-    if (!table || idx >= bound) return 0;
-    uint32_t entry = table + idx * 8;
-    if (REX_LOAD_U32(entry + 4) == 0 || REX_LOAD_U32(entry) == 0) return 0;
-    return entry;
-}
+// ponytail: this serves the handler the image already describes; it does not
+// explain why nothing registers record 4. Neither sub_82604D10/sub_8260D518 nor
+// anything reachable by an immediate reference to 0x8203B56C writes these slots,
+// so the registrar is still unidentified. Find it and this fallback goes away.
+static constexpr uint32_t IO_HANDLER_LIST = 0x8203B56Cu;  // 12-byte {a, b, n}
+static constexpr uint32_t IO_HANDLER_LIST_COUNT = 5u;
 
 extern "C" void __imp__sub_8260FF68(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8260FF68) {
     uint32_t self = ctx.r3.u32, idx = ctx.r4.u32 & 0xFF;
     __imp__sub_8260FF68(ctx, base);
-    if (self) {
-        bool known = false;
-        for (int i = 0; i < g_io_registry_count; i++)
-            if (g_io_registries[i] == self) { known = true; break; }
-        if (!known && g_io_registry_count < IO_REG_MAX)
-            g_io_registries[g_io_registry_count++] = self;
-    }
-    if (ctx.r3.u32 != 0) return;
+    if (ctx.r3.u32 != 0 || idx >= IO_HANDLER_LIST_COUNT) return;
 
-    for (int i = 0; i < g_io_registry_count; i++) {
-        uint32_t reg = g_io_registries[i];
-        if (reg == self) continue;
-        uint32_t entry = IoRegLookup(base, reg, idx);
-        if (!entry) continue;
-        ctx.r3.u64 = entry;
-        static int c = 0;
-        if (++c <= 10 || c % 500 == 0) {
-            FILE* f = fopen("saintsrow_heartbeat.log", "a");
-            if (f) { fprintf(f, "[IOReg #%d] idx=%u missed on 0x%08X, served from 0x%08X\n",
-                             c, idx, self, reg); fclose(f); }
-        }
-        return;
-    }
-    static int m = 0;
-    if (++m <= 10) {
+    uint32_t rec = IO_HANDLER_LIST + idx * 12;
+    if (REX_LOAD_U32(rec) == 0 || REX_LOAD_U32(rec + 4) == 0) return;
+    ctx.r3.u64 = rec;
+
+    static int c = 0;
+    if (++c <= 10 || c % 500 == 0) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
-        if (f) { fprintf(f, "[IOReg] idx=%u MISS on all %d known registries\n",
-                         idx, g_io_registry_count); fclose(f); }
+        if (f) { fprintf(f, "[IOReg #%d] idx=%u missed on 0x%08X, served record 0x%08X (%08X/%08X)\n",
+                         c, idx, self, rec, REX_LOAD_U32(rec), REX_LOAD_U32(rec + 4)); fclose(f); }
     }
 }
 
@@ -2436,12 +2400,43 @@ extern "C" void __imp__sub_82604D10(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_82604D10) {
     uint32_t a3 = ctx.r3.u32, a4 = ctx.r4.u32, a6 = ctx.r6.u32;
     uint32_t g = REX_LOAD_U32(0x837102B4);
+    uint32_t reg = g ? REX_LOAD_U32(g + 60) : 0; if (reg) reg -= 8;
+    uint32_t tab = reg ? REX_LOAD_U32(reg + 12) : 0;
+    uint32_t pre[6] = {};
+    for (int k = 0; k < 6 && tab; k++) pre[k] = REX_LOAD_U32(tab + k * 8);
     __imp__sub_82604D10(ctx, base);
+    if (tab) {
+        FILE* g2 = fopen("saintsrow_heartbeat.log", "a");
+        if (g2) {
+            fprintf(g2, "[IOReg-tab] reg=0x%08X tab=0x%08X", reg, tab);
+            for (int k = 0; k < 6; k++)
+                fprintf(g2, " %08X->%08X", pre[k], REX_LOAD_U32(tab + k * 8));
+            fprintf(g2, "\n");
+            fclose(g2);
+        }
+    }
     static int c = 0;
     if (++c <= 30) {
         FILE* f = fopen("saintsrow_heartbeat.log", "a");
         if (f) { fprintf(f, "[IOReg-add #%d] idx=%u fn=0x%08X ctx=0x%08X global=0x%08X -> 0x%08X\n",
                          c, a3, a4, a6, g, ctx.r3.u32); fclose(f); }
+    }
+}
+
+
+// sub_82610168(self, desc, out): the index it resolves is the first byte of the
+// descriptor at r4. Log it next to the result so we can tell whether the
+// E_NOTIMPL that reaches sub_826243D8 really comes from this lookup.
+extern "C" void __imp__sub_82610168(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_82610168) {
+    uint32_t self = ctx.r3.u32, desc = ctx.r4.u32;
+    uint32_t idx = desc ? REX_LOAD_U8(desc) : 0xFFFF;
+    __imp__sub_82610168(ctx, base);
+    static int c = 0;
+    if (++c <= 25) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[Fmt #%d] sub_82610168(self=0x%08X desc=0x%08X idx=%u) -> 0x%08X\n",
+                         c, self, desc, idx, ctx.r3.u32); fclose(f); }
     }
 }
 

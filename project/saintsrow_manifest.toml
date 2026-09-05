@@ -69,3 +69,151 @@ out_directory_path = "../generated/default"
 0x82608CC0 = { name = "sub_82608CC0" }
 0x826090D8 = { name = "sub_826090D8" }
 0x8278E644 = { name = "sub_8278E644" }
+
+# Virtual-call tail-call trampolines: short `lwz r11,0(rX); ...; mtctr r11;
+# bctr` sequences that only vtables reference, so the scanner folds them into
+# the preceding function instead of emitting an entry point. An indirect call
+# through one then aborts with "Call to invalid or unregistered function" at a
+# perfectly plausible code address. Each host function is re-declared with an
+# explicit size so the split pieces do not overlap.
+#
+# Regenerate by scanning for an mtctr+bctr tail call that begins right after a
+# blr/bctr and lies inside an already-emitted function. Skip the XEX import
+# thunk table -- its stubs are {0x01<mod><ord>, 0x02<mod><ord>, mtctr, bctr},
+# match the same shape, are supplied by the SDK, and splitting them breaks the
+# link with undefined sub_827888xx/sub_82789xxx symbols.
+0x82160468 = { name = "sub_82160468", size = 80 }
+0x821604B8 = { name = "sub_821604B8", size = 24 }
+0x822773F0 = { name = "sub_822773F0", size = 24 }
+0x82277408 = { name = "sub_82277408", size = 16 }
+0x82277418 = { name = "sub_82277418", size = 32 }
+0x8253C9B0 = { name = "sub_8253C9B0", size = 108 }
+0x8253CA1C = { name = "sub_8253CA1C", size = 20 }
+0x825EAB48 = { name = "sub_825EAB48", size = 24 }
+0x825EAB60 = { name = "sub_825EAB60", size = 24 }
+0x826B8788 = { name = "sub_826B8788", size = 32 }
+0x826B87A8 = { name = "sub_826B87A8", size = 24 }
+0x826B87C0 = { name = "sub_826B87C0", size = 24 }
+0x826B87D8 = { name = "sub_826B87D8", size = 24 }
+0x826B87F0 = { name = "sub_826B87F0", size = 24 }
+0x826B8808 = { name = "sub_826B8808", size = 24 }
+0x826C16E8 = { name = "sub_826C16E8", size = 120 }
+0x826C1760 = { name = "sub_826C1760", size = 20 }
+0x826C1774 = { name = "sub_826C1774", size = 20 }
+0x826C1788 = { name = "sub_826C1788", size = 116 }
+0x826C17FC = { name = "sub_826C17FC", size = 20 }
+0x826C1810 = { name = "sub_826C1810", size = 24 }
+
+# Small vtable-only functions the scanner folded into a neighbouring function.
+# Each address appears in a run of >= 4 consecutive code pointers in the image (a
+# vtable), starts right after a blr/bctr, and reaches its own blr/bctr within 16
+# instructions with no branches -- a self-contained leaf only virtual dispatch
+# reaches, so codegen never saw a call and merged it into whatever precedes it.
+# Calling one aborts with "Call to invalid or unregistered function" at a
+# perfectly plausible code address.
+#
+# A split is only safe when the host does not branch across it: reject any split
+# point S where an instruction in [host, S) targets >= S or one in [S, end)
+# targets < S, otherwise the two halves reference each other's labels and the
+# generated code will not compile. That check rejects 193 of the 280 candidates.
+# Declaring every vtable slot instead (3743 of them) splits functions mid-flow
+# and breaks game init before the first frame.
+0x8216F6D0 = { name = "sub_8216F6D0", size = 88 }
+0x8216F728 = { name = "sub_8216F728", size = 20 }
+0x8216F73C = { name = "sub_8216F73C", size = 20 }
+0x8216F750 = { name = "sub_8216F750", size = 24 }
+0x822027E8 = { name = "sub_822027E8", size = 60 }
+0x82202824 = { name = "sub_82202824", size = 8 }
+0x8220282C = { name = "sub_8220282C", size = 8 }
+0x82202834 = { name = "sub_82202834", size = 8 }
+0x8220283C = { name = "sub_8220283C", size = 8 }
+0x82202844 = { name = "sub_82202844", size = 8 }
+0x8220284C = { name = "sub_8220284C", size = 8 }
+0x822E1AA0 = { name = "sub_822E1AA0", size = 132 }
+0x822E1B24 = { name = "sub_822E1B24", size = 12 }
+0x823FD668 = { name = "sub_823FD668", size = 60 }
+0x823FD6A4 = { name = "sub_823FD6A4", size = 12 }
+0x823FD6B0 = { name = "sub_823FD6B0", size = 12 }
+0x823FD6BC = { name = "sub_823FD6BC", size = 12 }
+0x823FE718 = { name = "sub_823FE718", size = 40 }
+0x823FE740 = { name = "sub_823FE740", size = 8 }
+0x8241CD40 = { name = "sub_8241CD40", size = 68 }
+0x8241CD84 = { name = "sub_8241CD84", size = 20 }
+0x8241CD98 = { name = "sub_8241CD98", size = 20 }
+0x8241CDAC = { name = "sub_8241CDAC", size = 20 }
+0x8241CDC0 = { name = "sub_8241CDC0", size = 20 }
+0x8241CDD4 = { name = "sub_8241CDD4", size = 20 }
+0x8246C808 = { name = "sub_8246C808", size = 736 }
+0x8246CAE8 = { name = "sub_8246CAE8", size = 8 }
+0x8246CAF0 = { name = "sub_8246CAF0", size = 8 }
+0x8246CAF8 = { name = "sub_8246CAF8", size = 8 }
+0x8246CB00 = { name = "sub_8246CB00", size = 8 }
+0x8246CB08 = { name = "sub_8246CB08", size = 8 }
+0x8246CB10 = { name = "sub_8246CB10", size = 8 }
+0x8246CB18 = { name = "sub_8246CB18", size = 8 }
+0x824E8280 = { name = "sub_824E8280", size = 204 }
+0x824E834C = { name = "sub_824E834C", size = 20 }
+0x824E8360 = { name = "sub_824E8360", size = 20 }
+0x824E8374 = { name = "sub_824E8374", size = 20 }
+0x824EAEC8 = { name = "sub_824EAEC8", size = 16 }
+0x824EAED8 = { name = "sub_824EAED8", size = 24 }
+0x824FA2A0 = { name = "sub_824FA2A0", size = 124 }
+0x824FA31C = { name = "sub_824FA31C", size = 16 }
+0x824FA32C = { name = "sub_824FA32C", size = 16 }
+0x824FA33C = { name = "sub_824FA33C", size = 16 }
+0x824FA34C = { name = "sub_824FA34C", size = 20 }
+0x8257AE10 = { name = "sub_8257AE10", size = 136 }
+0x8257AE98 = { name = "sub_8257AE98", size = 8 }
+0x8257AEA0 = { name = "sub_8257AEA0", size = 8 }
+0x8257AEA8 = { name = "sub_8257AEA8", size = 8 }
+0x8257AEB0 = { name = "sub_8257AEB0", size = 8 }
+0x8257AEB8 = { name = "sub_8257AEB8", size = 8 }
+0x8257AEC0 = { name = "sub_8257AEC0", size = 8 }
+0x8257AEC8 = { name = "sub_8257AEC8", size = 8 }
+0x8257AED0 = { name = "sub_8257AED0", size = 8 }
+0x8257AED8 = { name = "sub_8257AED8", size = 8 }
+0x8257AEE0 = { name = "sub_8257AEE0", size = 8 }
+0x8257AEE8 = { name = "sub_8257AEE8", size = 8 }
+0x8257AEF0 = { name = "sub_8257AEF0", size = 8 }
+0x8257AEF8 = { name = "sub_8257AEF8", size = 8 }
+0x8257AF00 = { name = "sub_8257AF00", size = 8 }
+0x8257AF08 = { name = "sub_8257AF08", size = 8 }
+0x8257AF10 = { name = "sub_8257AF10", size = 8 }
+0x8257AF18 = { name = "sub_8257AF18", size = 8 }
+0x8257AF20 = { name = "sub_8257AF20", size = 8 }
+0x8257AF28 = { name = "sub_8257AF28", size = 8 }
+0x8257AF30 = { name = "sub_8257AF30", size = 8 }
+0x8257AF38 = { name = "sub_8257AF38", size = 8 }
+0x8257AF40 = { name = "sub_8257AF40", size = 8 }
+0x8257AF48 = { name = "sub_8257AF48", size = 8 }
+0x8257AF50 = { name = "sub_8257AF50", size = 8 }
+0x8257AF58 = { name = "sub_8257AF58", size = 8 }
+0x825E9E40 = { name = "sub_825E9E40", size = 140 }
+0x825E9ECC = { name = "sub_825E9ECC", size = 16 }
+0x825E9EDC = { name = "sub_825E9EDC", size = 16 }
+0x825E9EEC = { name = "sub_825E9EEC", size = 16 }
+0x825E9EFC = { name = "sub_825E9EFC", size = 16 }
+0x825E9F0C = { name = "sub_825E9F0C", size = 16 }
+0x825E9F1C = { name = "sub_825E9F1C", size = 16 }
+0x825E9F2C = { name = "sub_825E9F2C", size = 16 }
+0x825E9F3C = { name = "sub_825E9F3C", size = 16 }
+0x825E9F4C = { name = "sub_825E9F4C", size = 16 }
+0x825E9F5C = { name = "sub_825E9F5C", size = 16 }
+0x825E9F6C = { name = "sub_825E9F6C", size = 16 }
+0x825E9F7C = { name = "sub_825E9F7C", size = 16 }
+0x825E9F8C = { name = "sub_825E9F8C", size = 8 }
+0x825E9F94 = { name = "sub_825E9F94", size = 8 }
+0x825E9F9C = { name = "sub_825E9F9C", size = 8 }
+0x825E9FA4 = { name = "sub_825E9FA4", size = 8 }
+0x825E9FAC = { name = "sub_825E9FAC", size = 8 }
+0x825E9FB4 = { name = "sub_825E9FB4", size = 8 }
+0x825E9FBC = { name = "sub_825E9FBC", size = 8 }
+0x825E9FC4 = { name = "sub_825E9FC4", size = 8 }
+0x825E9FCC = { name = "sub_825E9FCC", size = 12 }
+0x825F42F0 = { name = "sub_825F42F0", size = 16 }
+0x825F4300 = { name = "sub_825F4300", size = 16 }
+0x82608CD8 = { name = "sub_82608CD8", size = 16 }
+0x82649690 = { name = "sub_82649690", size = 844 }
+0x826499DC = { name = "sub_826499DC", size = 16 }
+0x826499EC = { name = "sub_826499EC", size = 16 }
+0x826499FC = { name = "sub_826499FC", size = 20 }
