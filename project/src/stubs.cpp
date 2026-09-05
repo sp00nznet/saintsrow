@@ -386,6 +386,12 @@ REX_EXTERN(sub_822827B0) {
         if (f) { fprintf(f, "[GameUpdate #%d] FORCED state 1 -> 3 (loading safety timeout)\n", _c); fclose(f); }
     }
 }
+// Defined below, next to the ring-buffer plumbing.
+static std::mutex g_rb_mutex;
+static uint32_t g_prim_write_pos;
+static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
+                      uint32_t width, uint32_t height);
+
 TRACE_STATE("VideoMgr", 821FB9D8)
 // VideoDriver - trace video queue state
 extern "C" void __imp__sub_821FBD10(PPCContext& ctx, uint8_t* base);
@@ -755,8 +761,9 @@ REX_EXTERN(sub_8262FFE0) {
             // Linear (untiled) with ZYX1 swizzle for correct channel order
             static const uint32_t ft[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
                                            0x00001414, 0x00000000, 0x00000200};
-            for (uint32_t i = 0; i < 6; i++)
-                REX_MM_STORE_U32(REX_GPU_REG(0x4800 + i), ft[i]);
+            (void)ft;
+            // Submit a real PM4 swap through the ring buffer (see RbPresent).
+            RbPresent(base, REX_LOAD_U32(0x40001E00 + 13436), 0x09258000, 1280, 720);
             // ponytail: presentation now rides the ring buffer. SDK 0.10 moved
             // the GPU into the rexgpu-xenos plugin, which exports only
             // rex_gpu_create; CommandProcessor::IssueSwap / CallInThread /
@@ -1037,7 +1044,9 @@ REX_EXTERN(sub_825D3580) {
 
     // Track where we last created an indirect buffer reference
     static uint32_t last_ib_end = 0;
-    static uint32_t prim_write_pos = 31;
+    // Shared with RbPresent: both append to the same primary ring buffer.
+    uint32_t& prim_write_pos = g_prim_write_pos;
+    std::lock_guard<std::mutex> rb_lock(g_rb_mutex);
 
     // The data between last_ib_end and r4+40 contains rendering PM4 + kick PM4
     uint32_t ib_start = last_ib_end ? last_ib_end : rb_sec;
@@ -1734,6 +1743,82 @@ REX_EXTERN(sub_826368E0) {
         }
     }
     __imp__sub_826368E0(ctx, base);
+}
+
+// ---- Host-driven present over the ring buffer -------------------------------
+//
+// SDK 0.10 moved the GPU into the rexgpu-xenos plugin, which exports only
+// rex_gpu_create, so CommandProcessor::IssueSwap is no longer reachable from the
+// host and the old "force a swap from GL2_Render" hack died with the rebase.
+// The supported equivalent is what VdSwap itself does: put a PM4 swap packet in
+// the ring buffer and advance CP_RB_WPTR through GPU MMIO. The CP then runs
+// ExecutePacketType3_XE_SWAP and calls IssueSwap on its own thread.
+//
+// ponytail: this presents the frontbuffer every game frame rather than waiting
+// for the guest's own swap to survive our hand-built indirect buffers. Once the
+// IB stream parses cleanly the game's own VdSwap packet will do this, and this
+// helper goes away.
+static uint32_t g_prim_write_pos_init_ = (g_prim_write_pos = 31);   // 0..30 reserved for the game's ME_INIT
+static constexpr uint32_t RB_DWORDS = 8192;
+
+// Append dwords to the primary ring buffer (physical memory, byte-swapped) and
+// publish the new write pointer. Returns false when the buffer is not set up.
+static bool RbSubmit(uint8_t* base, uint32_t rb_prim_virt, const uint32_t* dw, uint32_t n) {
+    if (!rb_prim_virt || !n) return false;
+    auto* ks = REX_KERNEL_STATE();
+    uint32_t phys = ks->memory()->GetPhysicalAddress(rb_prim_virt);
+    if (phys == UINT32_MAX) return false;
+    uint8_t* host = ks->memory()->TranslatePhysical(phys);
+    if (!host) return false;
+
+    std::lock_guard<std::mutex> lock(g_rb_mutex);
+    if (g_prim_write_pos + n >= RB_DWORDS - 16) {
+        g_prim_write_pos = 31;
+        std::memset(host + 31 * 4, 0, (RB_DWORDS - 31) * 4);
+    }
+    for (uint32_t i = 0; i < n; i++)
+        rex::memory::store_and_swap<uint32_t>(host + (g_prim_write_pos + i) * 4, dw[i]);
+    g_prim_write_pos += n;
+    REX_MM_STORE_U32(REX_GPU_REG(0x01C5), g_prim_write_pos);   // CP_RB_WPTR
+    return true;
+}
+
+// The frontbuffer fetch constant the game hands VdSwap, with the tiled bit
+// cleared: the D3D12 framebuffer is linear, and leaving tiled set makes the
+// texture cache detile linear data (crosshatch artifacts, wrong sky colour).
+// Reference value only (see RbPresent for why it is not written): the
+// frontbuffer fetch constant with the tiled bit cleared, since the D3D12
+// framebuffer is linear and leaving tiled set makes the texture cache detile
+// linear data.
+[[maybe_unused]] static const uint32_t kSwapFetch[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
+                                                        0x00001414, 0x00000000, 0x00000200};
+
+static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
+                      uint32_t width, uint32_t height) {
+    uint32_t pkt[12];
+    uint32_t n = 0;
+    // Deliberately NOT writing fetch constant 0 here. VdSwap sets it because it
+    // owns the whole swap; we are injecting an extra present into a stream the
+    // game is also driving, and registers 0x4800..0x4805 are *shared* between
+    // texture fetch 0 and vertex fetch 0. The resolve path reads vertex fetch 0
+    // (GetResolveInfo: "D3D9 HACK: Vertices to use are always in vf0"), so
+    // writing the swap's texture fetch there makes every subsequent resolve fail
+    // with "Unsupported resolve vertex buffer format". Measured: 3037 failed
+    // resolves per run with the write, 25 without. The swap uses whatever
+    // texture fetch 0 the game's own VdSwap last published, which is correct.
+    pkt[n++] = (3u << 30) | ((4u - 1u) << 16) | (0x64u << 8);     // Type3 PM4_XE_SWAP, 4 dwords
+    pkt[n++] = 0x53574150u;                                        // 'SWAP'
+    pkt[n++] = fb_phys;
+    pkt[n++] = width;
+    pkt[n++] = height;
+    bool ok = RbSubmit(base, rb_prim_virt, pkt, n);
+    static int c = 0;
+    if (++c <= 5 || c % 300 == 0) {
+        FILE* f = fopen("saintsrow_heartbeat.log", "a");
+        if (f) { fprintf(f, "[RbPresent #%d] rb=0x%08X fb=0x%08X %ux%u wp=%u ok=%d\n",
+                         c, rb_prim_virt, fb_phys, width, height, g_prim_write_pos, ok); fclose(f); }
+    }
+    return ok;
 }
 
 // Hook streaming manager callback (sub_8265F720) and work finder (sub_8265F4F0)

@@ -1,6 +1,6 @@
 # Saints Row (Xbox 360, 2006) - Static Recompilation
 
-**Status: Front-end init completes -- the game loop runs and issues draw calls**
+**Status: Runs stably in the game loop -- draws and resolves mostly succeed, screen still black**
 
 ![Saints Row Logo Screen](logo.png)
 ![Cathedral Loading Screen](newscreen2.png)
@@ -93,8 +93,11 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Register the vtable-only entry points codegen folds into neighbouring functions
 - [x] **Front-end init completes** -- byte_8370DA94 sets, the 500ms fade runs, the main loop enters sub_82186C10
 - [x] Game loop cycles (GameLoop2 / GL2_Init / GL2_World / GL2_Spawn) and the GPU receives PM4_DRAW_INDX
-- [ ] Fix the next null-vtable dispatch (sub_82693AD0 region)
-- [ ] Nothing lands in the sampled framebuffer yet (all-zero pixels)
+- [x] Survive unregistered indirect calls instead of aborting (SDK patch) -- runs 50s+ instead of ~15s
+- [x] Restore presentation over the ring buffer (host-submitted PM4_XE_SWAP)
+- [x] Stop clobbering vertex fetch 0 from the swap -- resolve failures 3037 -> 25 per run
+- [ ] Framebuffer at 0x09258000 still reads all zeros, so the screen is black
+- [ ] The front-end fade (flt_8370D1A4) stalls at 0, so byte_8370DA95 never sets
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
@@ -213,6 +216,44 @@ What this does not do is explain why nothing registers record 4. Neither `sub_82
 reachable by an immediate reference to `0x8203B56C` writes these slots. Find the real registrar and
 the fallback goes away.
 
+### Running stably, and the vertex-fetch clobber (2026-09-04)
+
+Three changes took the game from aborting after ~15s to running indefinitely in the game loop.
+
+**Unregistered indirect calls are no longer fatal.** `InvalidFunctionTrap` in the SDK's
+`function_dispatcher.cpp` now logs each distinct `(target, lr)` once and returns instead of calling
+`REX_FATAL`. A guest indirect call can land on an address codegen never emitted an entry point for,
+and aborting turned every one of those into its own build/run cycle to discover the next. Returning
+lets a single run report them all. This is a development aid -- revert it to `REX_FATAL` once the
+manifest is complete.
+
+**Presentation goes back through the ring buffer.** The forced `IssueSwap` died with the rebase
+(the plugin does not export it). `RbPresent` now builds the same PM4 sequence `VdSwap` does -- a
+Type3 `PM4_XE_SWAP` carrying the `'SWAP'` fourcc, frontbuffer physical address, width and height --
+appends it to the primary ring buffer and advances `CP_RB_WPTR` through GPU MMIO. The CP picks it
+up and calls `IssueSwap` on its own thread. The kick hook and `RbPresent` share one write position
+under a mutex, since both append to the same buffer.
+
+**The swap must not write fetch constant 0.** `VdSwap` sets registers `0x4800..0x4805` because it
+owns the whole swap. We are injecting an extra present into a stream the game is also driving, and
+those registers are *shared* between texture fetch 0 and vertex fetch 0. The resolve path reads
+vertex fetch 0 -- `GetResolveInfo` in `graphics/util/draw.cpp` carries the comment "D3D9 HACK:
+Vertices to use are always in vf0, and are written by the CPU" -- so writing the swap's texture
+fetch there makes every subsequent resolve fail:
+
+| swap writes fetch 0 | failed resolves per run | failed draws |
+| --- | --- | --- |
+| yes | 3037 | 3043 |
+| no | 25 | 25 |
+
+Dropping the write leaves the swap using whatever texture fetch 0 the game's own `VdSwap` last
+published, which is what it should have been doing.
+
+**Still black.** The framebuffer at `0x09258000` reads all zeros, so the resolves that now succeed
+are not landing there, and the front-end fade `flt_8370D1A4` never advances off 0 (so
+`byte_8370DA95`, and with it the transition out of the fade, never happens). Those are the next two
+threads.
+
 ### Vtable-only entry points (2026-09-04)
 
 Past front-end init the game started aborting on calls to *plausible* code addresses
@@ -259,8 +300,8 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 
 ### Known Issues
 
-- Null-vtable dispatch after front-end init (`lr=0x82693AD0`, target `0x0F`) -- current top blocker
-- Sampled framebuffer reads all zeros, so draws are not landing where we look
+- Framebuffer at `0x09258000` reads all zeros -- the screen is black despite draws succeeding (current top blocker)
+- The front-end fade `flt_8370D1A4` stalls at 0, so `byte_8370DA95` never sets
 - PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
 - Scrolling white horizontal bar (screen tearing from unsynchronized IssueSwap)
