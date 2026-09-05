@@ -380,10 +380,18 @@ REX_EXTERN(sub_822827B0) {
         if (f) { fprintf(f, "[GameUpdate #%d] FORCED state 1 -> 3 (loading safety timeout)\n", _c); fclose(f); }
     }
 }
+// The frontbuffer the game last passed to VdSwap. The forced present below has
+// to follow the game's buffer rotation; pinning it to one address presents a
+// stale frame interleaved with the live ones (black / THQ logo / glyph artifact
+// cycling forever).
+static std::atomic<uint32_t> g_fb_phys{0x09258000};
+static std::atomic<uint32_t> g_fb_w{1280};
+static std::atomic<uint32_t> g_fb_h{720};
+
 // Defined below, next to the ring-buffer plumbing.
 static std::mutex g_rb_mutex;
 static uint32_t g_prim_write_pos;
-static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
+[[maybe_unused]] static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
                       uint32_t width, uint32_t height);
 
 TRACE_STATE("VideoMgr", 821FB9D8)
@@ -824,8 +832,28 @@ REX_EXTERN(sub_8262FFE0) {
             static const uint32_t ft[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
                                            0x00001414, 0x00000000, 0x00000200};
             (void)ft;
-            // Submit a real PM4 swap through the ring buffer (see RbPresent).
-            RbPresent(base, REX_LOAD_U32(0x40001E00 + 13436), 0x09258000, 1280, 720);
+            // Force a present every frame. This is not (only) about pixels: the
+            // game's logic paces off swap completion, and with this removed the
+            // menu stops responding to input and the intro loops in attract mode
+            // even though the renderer keeps drawing. Follow the frontbuffer the
+            // game last gave VdSwap rather than a fixed address, or our stale
+            // frame interleaves with the live ones.
+            RbPresent(base, REX_LOAD_U32(0x40001E00 + 13436),
+                      g_fb_phys.load(std::memory_order_relaxed),
+                      g_fb_w.load(std::memory_order_relaxed),
+                      g_fb_h.load(std::memory_order_relaxed));
+            // Superseded note: do NOT inject a swap here. We used to force one every frame, first
+            // via CommandProcessor::IssueSwap and then, after the SDK 0.10 rebase
+            // put the GPU behind a plugin, by appending our own PM4_XE_SWAP to the
+            // ring buffer. Both presented a *hardcoded* frontbuffer (0x09258000)
+            // while the game rotates through its own buffers, so our stale frame
+            // interleaved with the game's live ones. On screen that is three
+            // frames cycling forever: black, THQ logo, glyph artifact.
+            //
+            // The game's own VdSwap packet reaches the command processor and
+            // presents correctly -- confirmed by the fact that editing the fetch
+            // constant in *its* packet changes what appears on screen. So
+            // presentation needs nothing from us.
             // ponytail: presentation now rides the ring buffer. SDK 0.10 moved
             // the GPU into the rexgpu-xenos plugin, which exports only
             // rex_gpu_create; CommandProcessor::IssueSwap / CallInThread /
@@ -1437,6 +1465,11 @@ REX_EXTERN(__imp__VdSwap) {
         uint32_t fb_phys = REX_LOAD_U32(buf_addr + 36); // buf[9] = frontbuffer phys
         uint32_t width = REX_LOAD_U32(buf_addr + 40);   // buf[10]
         uint32_t height = REX_LOAD_U32(buf_addr + 44);  // buf[11]
+        if (fb_phys) {
+            g_fb_phys.store(fb_phys, std::memory_order_relaxed);
+            if (width)  g_fb_w.store(width, std::memory_order_relaxed);
+            if (height) g_fb_h.store(height, std::memory_order_relaxed);
+        }
 
         // Read the fetch constant data (6 dwords after the Type0 header)
         uint32_t fetch[6];
@@ -1715,7 +1748,7 @@ static constexpr uint32_t RB_DWORDS = 8192;
 
 // Append dwords to the primary ring buffer (physical memory, byte-swapped) and
 // publish the new write pointer. Returns false when the buffer is not set up.
-static bool RbSubmit(uint8_t* base, uint32_t rb_prim_virt, const uint32_t* dw, uint32_t n) {
+[[maybe_unused]] static bool RbSubmit(uint8_t* base, uint32_t rb_prim_virt, const uint32_t* dw, uint32_t n) {
     if (!rb_prim_virt || !n) return false;
     auto* ks = REX_KERNEL_STATE();
     uint32_t phys = ks->memory()->GetPhysicalAddress(rb_prim_virt);
@@ -1745,7 +1778,7 @@ static bool RbSubmit(uint8_t* base, uint32_t rb_prim_virt, const uint32_t* dw, u
 [[maybe_unused]] static const uint32_t kSwapFetch[6] = {0x0A000002, 0x09258006, 0x0059E4FF,
                                                         0x00001414, 0x00000000, 0x00000200};
 
-static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
+[[maybe_unused]] static bool RbPresent(uint8_t* base, uint32_t rb_prim_virt, uint32_t fb_phys,
                       uint32_t width, uint32_t height) {
     uint32_t pkt[12];
     uint32_t n = 0;

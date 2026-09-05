@@ -100,7 +100,9 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Drop the synthetic controller input; the SDK's real SDL input drives the game now
 - [x] Legal -> FMV -> main menu -> New Game all work, with correct graphics and real input
 - [x] Diagnose the church-screen stall: streaming is pumped only from the boot state machine
+- [x] Follow the game's frontbuffer rotation in the forced present (fixes the 3-frame flicker)
 - [ ] Dispatch queued IO in-game without leaking IO contexts (see below)
+- [ ] Load Game halts on a null deref: XamShowDeviceSelectorUI is always headless (see below)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
 - [ ] Input system (controller navigation past menus)
@@ -218,6 +220,34 @@ What this does not do is explain why nothing registers record 4. Neither `sub_82
 `sub_8260D518` (hooking it shows the handler table unchanged across the call) nor anything
 reachable by an immediate reference to `0x8203B56C` writes these slots. Find the real registrar and
 the fallback goes away.
+
+### The forced present is load-bearing, and must follow the buffer rotation (2026-09-05)
+
+`GL2_Render` forces a present every frame. It is tempting to delete -- the game's own `VdSwap`
+packet reaches the command processor and presents correctly, which is provable by editing the fetch
+constant in *its* packet and watching the screen change. Deleting it is wrong anyway: the game's
+logic paces off swap completion, and without the forced present the menu stops responding to input
+and the intro loops in attract mode while the renderer keeps drawing. A `git diff` confirmed
+removing that single call was the only functional change.
+
+What *was* wrong is that it presented a hardcoded frontbuffer (`0x09258000`) while the game rotates
+through its own buffers, so a stale frame interleaved with the live ones -- on screen, three frames
+cycling forever (black, THQ logo, glyph artifact). It now publishes the frontbuffer address, width
+and height that the game last handed `VdSwap` and presents that.
+
+### Load Game wedges on save enumeration (2026-09-05)
+
+Highlighting Load Game in the main menu freezes the game: the render loop and `SceneTick` keep
+running, memory is stable, no heap errors -- but input stops reaching the game.
+
+The kernel log at debug level shows why. Load Game calls `XamShowDeviceSelectorUI`, and in the SDK
+that entry is dispatched headlessly **unconditionally** -- unlike `XamShowMessageBoxUI` and
+`XamShowKeyboardUI`, it does not check the `headless` cvar. It returns a dummy device ID
+(`0x00000001`) with `X_ERROR_SUCCESS`. The game then enumerates saves on that device, finds nothing
+useful, and dereferences a null: `Call to invalid or unregistered function at guest address
+0x0000000F (from lr 0x820FA6E8)`, followed by an unhandled guest access violation.
+
+Avoid Load Game for now. New Game is unaffected and is the path that matters.
 
 ### Why the level load behind the church screen does nothing (2026-09-05)
 
@@ -375,6 +405,7 @@ A deep static-analysis pass (IDA Pro headless, byte-aligned to the recomp image,
 ### Known Issues
 
 - New Game reaches the church screen and stops: the loading spinner animates and the render loop is alive, but the streaming pipeline issues no IO (current top blocker)
+- Highlighting Load Game wedges the game on a null deref (see the save-enumeration note below)
 - Screen capture of the D3D12 window from a script comes back black even while the game is visibly rendering; observations come from running it by hand
 - PM4 Type0 overflow on the hand-built indirect buffers -- nothing presents
 - Red color tint on bright areas (highlights, trees) -- likely gamma ramp or render target format mismatch
