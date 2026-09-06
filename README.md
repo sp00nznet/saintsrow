@@ -103,7 +103,8 @@ Native x86-64 .exe          -- Saints Row on PC
 - [x] Follow the game's frontbuffer rotation in the forced present (fixes the 3-frame flicker)
 - [x] Locate the in-game stall: IO workers park on a semaphore that is signalled but never consumed
 - [x] Fix the guest/native object duplication: 201 native objects for one guest event, now 1
-- [ ] Find who should signal the IO event -- nothing ever does, so the workers still never wake
+- [x] Map the streaming dispatch path end to end (driver, enqueue, workers)
+- [ ] Find why the level loader allocates but never submits an IO request
 - [ ] Load Game halts on a null deref: XamShowDeviceSelectorUI is always headless (see below)
 - [ ] Restore presentation on the ring-buffer path (PM4 Type0 overflow)
 - [ ] Fix remaining color tint on highlights (red cast on bright areas, pink trees)
@@ -252,6 +253,43 @@ useful, and dereferences a null: `Call to invalid or unregistered function at gu
 0x0000000F (from lr 0x820FA6E8)`, followed by an unhandled guest access violation.
 
 Avoid Load Game for now. New Game is unaffected and is the path that matters.
+
+### Nothing is enqueuing IO at all (2026-09-06)
+
+With the object duplication fixed, uncapped counters on every guest function that touches the IO
+sync objects (found by scanning the image for references to `0x832AD66C` / `0x832AD680` /
+`0x832AD690` / `0x832AD6A0`) give a clear picture on the church screen:
+
+| function | role | calls |
+| --- | --- | --- |
+| `sub_8260CAD8` | IO worker body | 201 (all parked inside) |
+| `sub_8260CBA0` | worker spawn | 0 |
+| `sub_8260D180` | enqueue | 0 |
+| `sub_8260D2D8` | enqueue | 0 |
+| `sub_8260DE50` / `sub_8260DE98` | queue helpers | 0 |
+| `sub_8260C5F8` | context ctor path | 0 |
+
+`sub_8265F720` (StreamCallback) has **no direct callers** anywhere in the recompiled image -- it is
+reached only through a pointer. The slot holding it (`0x827A1F24`) is referenced by exactly one
+function, `sub_82604B00`, which is the real dispatch driver:
+
+```
+sub_82604B00(arg):
+    lock
+    ctx = [dword_837102B4]                  // global IO context
+    if (ctx != 0)  ctx->vtable[1]()         // in-game path -> sub_82604ED0
+    else           scan 0x827A1F24..0x827A1F28 for a callback and call it
+                                            // boot path -> sub_8265F720
+```
+
+Boot takes the callback branch; once a context exists every call takes the context branch. But the
+driver is only called **three times in a whole session** (once at boot, twice in-game), so it is a
+"kick", not a pump.
+
+So the shape of the stall is now precise: the workers are correctly parked on one shared event, no
+enqueue function is ever called, and the driver barely runs -- yet the level loader is clearly busy,
+allocating its way to 2.6GB during New Game. The loader is allocating but never submitting an IO
+request. That submission path, upstream of all this plumbing, is the next thing to find.
 
 ### One guest event, 201 native objects (2026-09-05)
 

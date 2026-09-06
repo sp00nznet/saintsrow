@@ -678,6 +678,13 @@ static void PumpStreaming(PPCContext& ctx, uint8_t* base, int max_pumps) {
     }
 }
 
+// Uncapped counters for every guest function that touches the IO sync objects
+// (found by scanning the image for references to 0x832AD66C/0x832AD680/
+// 0x832AD690/0x832AD6A0). The workers wait on an event nothing signals, so the
+// question is which of these the in-game load actually reaches.
+static std::atomic<uint32_t> g_iofn[7];
+static const char* const kIoFnNames[7] = {"D180", "D2D8", "CAD8", "CBA0", "DE50", "DE98", "C5F8"};
+
 // ---- Uncapped streaming counters --------------------------------------------
 // Every other probe in this file caps its logging, which makes "has this stopped
 // being called?" impossible to answer from a long-running session. These are
@@ -819,6 +826,10 @@ REX_EXTERN(sub_8262FFE0) {
                         REX_LOAD_U32(0x8370DD7C),
                         (int32_t)REX_LOAD_U32(0x832AD66C + 4),
                         (int32_t)REX_LOAD_U32(0x832AD680 + 4));
+                fprintf(f, "[IOFn]");
+                for (int k = 0; k < 7; k++)
+                    fprintf(f, " %s=%u", kIoFnNames[k], g_iofn[k].load(std::memory_order_relaxed));
+                fprintf(f, "\n");
                 fclose(f);
             }
             for (int i = 0; i < 5; i++) last[i] = now[i];
@@ -946,6 +957,25 @@ TRACE_CALL("ThreadWrap", 82716078)
 // to allow loading callbacks to fire and update viewport loading flags.
 extern "C" void __imp__sub_82604B00(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_82604B00) {
+    // This is the real driver behind StreamCallback. It branches on the global
+    // IO context at dword_837102B4: context == 0 scans the slot table at
+    // 0x827A1F24 and calls what it finds (sub_8265F720, StreamCallback);
+    // context != 0 calls context->vtable[1]() instead. Boot takes the first
+    // branch, in-game always the second, so if that vtable entry does not
+    // dispatch queued IO nothing ever posts work.
+    {
+        static std::atomic<uint32_t> n_ctx{0}, n_cb{0};
+        uint32_t io_ctx = REX_LOAD_U32(0x837102B4);
+        uint32_t vt = io_ctx ? REX_LOAD_U32(io_ctx) : 0;
+        uint32_t fn = vt ? REX_LOAD_U32(vt + 4) : 0;
+        uint32_t seq = (io_ctx ? n_ctx : n_cb).fetch_add(1, std::memory_order_relaxed);
+        if (seq < 5 || (seq % 4000) == 0) {
+            FILE* f = fopen("saintsrow_heartbeat.log", "a");
+            if (f) { fprintf(f, "[IODrv] %s #%u ctx=0x%08X vt=0x%08X vt[1]=0x%08X\n",
+                             io_ctx ? "via-context" : "via-callback", seq, io_ctx, vt, fn); fclose(f); }
+        }
+    }
+
     static int c = 0;
     c++;
     uint32_t arg = ctx.r3.u32;
@@ -2135,6 +2165,7 @@ REX_EXTERN(sub_82600A68) {
 // Called via sub_826230C8 vtable dispatch when work is submitted
 extern "C" void __imp__sub_8260D180(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8260D180) {
+    g_iofn[0].fetch_add(1, std::memory_order_relaxed);
     static int c = 0;
     c++;
     if (c <= 20 || c % 100 == 0) {
@@ -2547,4 +2578,36 @@ REX_EXTERN(sub_82610168) {
         if (f) { fprintf(f, "[Fmt #%d] sub_82610168(self=0x%08X desc=0x%08X idx=%u) -> 0x%08X\n",
                          c, self, desc, idx, ctx.r3.u32); fclose(f); }
     }
+}
+
+// IO sync-object touchpoints: count only, no behaviour change.
+extern "C" void __imp__sub_8260D2D8(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260D2D8) {
+    g_iofn[1].fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_8260D2D8(ctx, base);
+}
+extern "C" void __imp__sub_8260CAD8(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260CAD8) {
+    g_iofn[2].fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_8260CAD8(ctx, base);
+}
+extern "C" void __imp__sub_8260CBA0(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260CBA0) {
+    g_iofn[3].fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_8260CBA0(ctx, base);
+}
+extern "C" void __imp__sub_8260DE50(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260DE50) {
+    g_iofn[4].fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_8260DE50(ctx, base);
+}
+extern "C" void __imp__sub_8260DE98(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260DE98) {
+    g_iofn[5].fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_8260DE98(ctx, base);
+}
+extern "C" void __imp__sub_8260C5F8(PPCContext& ctx, uint8_t* base);
+REX_EXTERN(sub_8260C5F8) {
+    g_iofn[6].fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_8260C5F8(ctx, base);
 }
