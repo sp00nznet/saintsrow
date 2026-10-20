@@ -29,3 +29,9 @@ target_compile_options(saintsrow PRIVATE -fno-strict-aliasing -ffp-model=strict 
 if(WIN32)
     target_link_options(saintsrow PRIVATE "LINKER:/force:multiple" "LINKER:/STACK:16777216")
 endif()
+
+# A build with none of the game-specific overrides (see the top of stubs.cpp).
+option(SAINTSROW_BARE "Build without the game-specific stub overrides" OFF)
+if(SAINTSROW_BARE)
+    target_compile_definitions(saintsrow PRIVATE SR_BARE)
+endif()

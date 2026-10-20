@@ -24,6 +24,10 @@
 #include <atomic>
 #include <cstring>
 
+// SAINTSROW_BARE drops every game-specific override below, leaving the plain
+// runtime plus the scripted controller, to test which hacks are still needed.
+#ifndef SR_BARE
+
 // Worker thread semaphore handles captured from sub_826368E0
 static uint32_t g_worker_sem_handles[16] = {};
 static int g_worker_sem_count = 0;
@@ -2610,4 +2614,50 @@ extern "C" void __imp__sub_8260C5F8(PPCContext& ctx, uint8_t* base);
 REX_EXTERN(sub_8260C5F8) {
     g_iofn[6].fetch_add(1, std::memory_order_relaxed);
     __imp__sub_8260C5F8(ctx, base);
+}
+
+#endif  // SR_BARE
+
+// Scripted controller for unattended runs. SR_AUTOPLAY=1 presses a button for
+// 200 ms every 4 s (after the first 10 s), alternating A and Y, on top of
+// whatever the real pad reports. Y is "Begin Game" on Player Creation; A walks
+// everything before it. (START only pauses there.)
+// That walks attract mode, the main menu and the New Game prompts without the
+// window having focus, which the SDK requires before it reports real input --
+// so a test run on a second monitor never has to take the keyboard.
+// Unset, this is a plain pass-through to the SDK's input system.
+// ponytail: one fixed pulse; a per-run script (button@time list) when a test
+// needs to pick a different menu item.
+#include <rex/input/input_system.h>
+REX_EXTERN(__imp__XamInputGetState) {
+    uint32_t user = ctx.r3.u32, flags = ctx.r4.u32, state_ptr = ctx.r5.u32;
+    if ((flags & 0xFF) && (flags & 1 /*XINPUT_FLAG_GAMEPAD*/) == 0) {
+        ctx.r3.u64 = 0x48F;  // X_ERROR_DEVICE_NOT_CONNECTED
+        return;
+    }
+    if ((user & 0xFF) == 0xFF || (flags & 0x40000000 /*XINPUT_FLAG_ANY_USER*/)) user = 0;
+    auto* is = static_cast<rex::input::InputSystem*>(REX_KERNEL_STATE()->emulator()->input_system());
+    auto* state = state_ptr ? REX_KERNEL_MEMORY()->TranslateVirtual<rex::input::X_INPUT_STATE*>(state_ptr)
+                            : nullptr;
+    uint32_t result = is->GetState(user, state);
+
+    static const bool autoplay = [] {
+        const char* v = std::getenv("SR_AUTOPLAY");
+        return v && v[0] == '1';
+    }();
+    if (autoplay && user == 0 && state) {
+        using clock = std::chrono::steady_clock;
+        static const auto start = clock::now();
+        static std::atomic<uint32_t> packet{1};
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();
+        if (result != 0) std::memset(state, 0, sizeof(*state));
+        if (ms > 10000 && ms % 4000 < 200) {
+            uint16_t button = (ms / 4000) % 2 ? 0x8000 /*Y*/ : 0x1000 /*A*/;
+            state->gamepad.buttons = uint16_t(state->gamepad.buttons) | button;
+        }
+        // The game only acts on a new packet number, so tick it every call.
+        state->packet_number = packet.fetch_add(1);
+        result = 0;
+    }
+    ctx.r3.u64 = result;
 }

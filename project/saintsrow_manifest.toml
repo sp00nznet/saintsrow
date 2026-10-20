@@ -14,38 +14,27 @@ out_directory_path = "../generated/default"
 
 # Manual function definitions for unresolved branch targets.
 #
-# C++ adjustor thunks: 8-byte `addi rX,rX,-N; b target` pairs packed into
+# C++ adjustor thunks: 8-byte `addi r3,r3,N; b target` pairs packed into
 # tables. Only vtables reference them, so the scanner never sees a call and
 # leaves them out of the dispatch table -- an indirect call through one then
-# aborts with "Call to invalid or unregistered function". Regenerate the list
-# with a scan for runs of >=3 consecutive thunk pairs not already emitted.
+# aborts with "Call to invalid or unregistered function".
+#
+# The register must be r3 (`this`). The first scan accepted any register and
+# also declared jump-table case bodies (`addi r11,r11,1; b common`) and shared
+# epilogue tails (`addi r1,r1,N; b __restgprlr`) as functions. That splits the
+# real host function, and a loop back-edge across the split compiles to
+# REX_FATAL("Unresolved branch ...") -- sub_8222F7F8 died that way. 38 such
+# entries were removed on 2026-10-20.
 [entrypoint.functions]
-0x8222F9C4 = { name = "sub_8222F9C4", size = 8 }
-0x8222F9CC = { name = "sub_8222F9CC", size = 8 }
-0x8222F9D4 = { name = "sub_8222F9D4", size = 8 }
-0x8222FC58 = { name = "sub_8222FC58", size = 8 }
-0x8222FC60 = { name = "sub_8222FC60", size = 8 }
-0x8222FC68 = { name = "sub_8222FC68", size = 8 }
-0x822300A8 = { name = "sub_822300A8", size = 8 }
-0x822300B0 = { name = "sub_822300B0", size = 8 }
-0x822300B8 = { name = "sub_822300B8", size = 8 }
-0x82256500 = { name = "sub_82256500", size = 8 }
-0x82261748 = { name = "sub_82261748", size = 8 }
-0x8227DE20 = { name = "sub_8227DE20", size = 8 }
-0x8235EE54 = { name = "sub_8235EE54", size = 8 }
-0x8235EE5C = { name = "sub_8235EE5C", size = 8 }
-0x8235EE64 = { name = "sub_8235EE64", size = 8 }
-0x8235EE6C = { name = "sub_8235EE6C", size = 8 }
-0x823625C8 = { name = "sub_823625C8", size = 8 }
-0x823625D0 = { name = "sub_823625D0", size = 8 }
-0x823625D8 = { name = "sub_823625D8", size = 8 }
-0x823625E0 = { name = "sub_823625E0", size = 8 }
-0x82388B64 = { name = "sub_82388B64", size = 8 }
-0x82388B6C = { name = "sub_82388B6C", size = 8 }
-0x82388B74 = { name = "sub_82388B74", size = 8 }
-0x82388B7C = { name = "sub_82388B7C", size = 8 }
-0x825EFED8 = { name = "sub_825EFED8", size = 8 }
-0x82608C20 = { name = "sub_82608C20", size = 8 }
+# 8-byte `li r4,N; b target` stubs packed in a vtable-only table at 0x8221EC00.
+# The scanner emitted some of them and skipped their neighbours outright; these
+# are the ones Player Creation calls (found by the unregistered-call log).
+0x8221EC08 = { name = "sub_8221EC08", size = 8 }
+0x8221EC28 = { name = "sub_8221EC28", size = 8 }
+0x8221EC40 = { name = "sub_8221EC40", size = 8 }
+0x8221EC48 = { name = "sub_8221EC48", size = 8 }
+0x8221EC50 = { name = "sub_8221EC50", size = 8 }
+0x8221ECF8 = { name = "sub_8221ECF8", size = 8 }
 0x82608C88 = { name = "sub_82608C88", size = 8 }
 0x82608C90 = { name = "sub_82608C90", size = 8 }
 0x82609D38 = { name = "sub_82609D38", size = 8 }
@@ -55,20 +44,8 @@ out_directory_path = "../generated/default"
 0x82609D80 = { name = "sub_82609D80", size = 8 }
 0x82609D90 = { name = "sub_82609D90", size = 8 }
 0x826235B0 = { name = "sub_826235B0", size = 8 }
-0x82688B98 = { name = "sub_82688B98", size = 8 }
-0x826DB7F8 = { name = "sub_826DB7F8", size = 8 }
-0x8278E628 = { name = "sub_8278E628", size = 8 }
-0x8278E630 = { name = "sub_8278E630", size = 8 }
-0x8278E638 = { name = "sub_8278E638", size = 8 }
-0x8222F9EC = { name = "sub_8222F9EC" }
-0x8222FC88 = { name = "sub_8222FC88" }
-0x822300D0 = { name = "sub_822300D0" }
-0x8235EE78 = { name = "sub_8235EE78" }
-0x823625EC = { name = "sub_823625EC" }
-0x82388B88 = { name = "sub_82388B88" }
 0x82608CC0 = { name = "sub_82608CC0" }
 0x826090D8 = { name = "sub_826090D8" }
-0x8278E644 = { name = "sub_8278E644" }
 
 # Virtual-call tail-call trampolines: short `lwz r11,0(rX); ...; mtctr r11;
 # bctr` sequences that only vtables reference, so the scanner folds them into

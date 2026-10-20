@@ -147,6 +147,38 @@ static uint8_t g_bad_rip_skip[BAD_RIP_CACHE_SIZE] = {};  // instruction length t
 static int g_bad_rip_count = 0;
 
 static thread_local int g_veh_depth = 0;
+#ifdef _WIN32
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+// Last-chance crash report: writes the exception and the faulting thread's
+// stack as module+offset to saintsrow_crash.log, then lets the process die.
+// It changes nothing, unlike NullPageHandler. Symbolize offline with
+//   llvm-symbolizer --obj=saintsrow.exe <0x140000000 + offset>
+static LONG WINAPI CrashReportFilter(EXCEPTION_POINTERS* ep) {
+    FILE* f = fopen("saintsrow_crash.log", "a");
+    if (!f) return EXCEPTION_CONTINUE_SEARCH;
+    auto* er = ep->ExceptionRecord;
+    fprintf(f, "code=0x%08lX addr=0x%llX rip=0x%llX tid=%lu\n", er->ExceptionCode,
+            (unsigned long long)(er->NumberParameters > 1 ? er->ExceptionInformation[1] : 0),
+            (unsigned long long)ep->ContextRecord->Rip, GetCurrentThreadId());
+    HANDLE proc = GetCurrentProcess(), th = GetCurrentThread();
+    SymInitialize(proc, nullptr, TRUE);
+    CONTEXT ctx = *ep->ContextRecord;
+    STACKFRAME64 sf{};
+    sf.AddrPC = {ctx.Rip, 0, AddrModeFlat};
+    sf.AddrFrame = {ctx.Rbp, 0, AddrModeFlat};
+    sf.AddrStack = {ctx.Rsp, 0, AddrModeFlat};
+    for (int i = 0; i < 48 && StackWalk64(IMAGE_FILE_MACHINE_AMD64, proc, th, &sf, &ctx, nullptr,
+                                          SymFunctionTableAccess64, SymGetModuleBase64, nullptr); ++i) {
+        IMAGEHLP_MODULE64 m{sizeof(m)};
+        SymGetModuleInfo64(proc, sf.AddrPC.Offset, &m);
+        fprintf(f, "  %s+0x%llX\n", m.ModuleName, (unsigned long long)(sf.AddrPC.Offset - m.BaseOfImage));
+    }
+    fclose(f);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 static LONG WINAPI NullPageHandler(EXCEPTION_POINTERS* ep) {
     // Log any non-AV exceptions (stack overflow, guard page, etc.)
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
@@ -868,15 +900,21 @@ class SaintsRowApp : public rex::ReXApp {
   // The null page must exist before any guest code runs, and the VEH must be
   // registered after the SDK installs its own handlers so ours runs first.
   void OnPostLoadXexImage() override {
+#ifndef SR_BARE
     InitNullObjectPage(runtime()->memory()->virtual_membase());
     REXLOG_INFO("Null object page at guest 0x{:08X}", g_null_object_guest_addr);
     AddVectoredExceptionHandler(1, NullPageHandler);
+#else
+    SetUnhandledExceptionFilter(CrashReportFilter);
+#endif
   }
 
   void OnPreLaunchModule() override {
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
     signal(SIGABRT, FatalGuestContextHandler);
+#ifndef SR_BARE
     std::thread(WatchdogThread).detach();
+#endif
   }
 #endif
 };
