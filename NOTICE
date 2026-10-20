@@ -1,0 +1,15 @@
+Saints Row static recompilation
+Copyright (c) 2026 sp00nz. MIT licence; see LICENSE.
+
+This repository includes material derived from third-party software:
+
+Path                         Upstream                                   Version             Licence
+docs/sdk-patches/*.patch     ReXGlue SDK                                development@bd833a2  BSD-3-Clause
+                             https://github.com/rexglue/rexglue-sdk
+                             (portions derived from Xenia, BSD-3-Clause)
+
+The patches are diffs against ReXGlue source and carry its context lines.
+The licence text is in LICENSES/rexglue-sdk-BSD-3-Clause.txt.
+
+Not included and not licensed here: Saints Row (code, data, art, audio),
+and the C++ that ReXGlue's codegen generates from it.

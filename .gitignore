@@ -29,19 +29,22 @@ pe_image.bin
 # Extracted game data
 extracted/
 
-# Generated files from XenonRecomp (very large)
+# Generated from the game by ReXGlue codegen: never committed
 generated/
 ppc/
+project/generated/
 
 # ReXGlue SDK (cloned separately)
 thirdparty/
 
-# Claude
-.claude/
-project/build4/
-project/generated/
+# Build dirs and locally cloned tools
 project/build*/
 tools/rexglue-sdk/
 tools/rexglue-sdk-prebuilt*/
 tools/rexglue-sdk*.zip
 tools/XenonRecomp/
+
+# Setup outputs
+setup.log
+Play.cmd
+tools/360tools/

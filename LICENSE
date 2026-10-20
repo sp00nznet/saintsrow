@@ -19,17 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----------------------------------------------------------------------------
-Scope
-
-The MIT licence above covers the code in this repository: the tools, the
-runtime, the build files and the documentation.
-
-It does NOT and cannot cover Saints Row itself. The game's code, art, audio and
-data belong to their rights holders, are not distributed here, and you need
-your own legitimate copy to use any of this.
-
-Code that this project's tools generate from the game is a derivative of it
-and is outside the MIT grant for the same reason. It is made from your own
-copy and is deliberately not tracked in this repository.

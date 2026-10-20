@@ -30,8 +30,11 @@ if(WIN32)
     target_link_options(saintsrow PRIVATE "LINKER:/force:multiple" "LINKER:/STACK:16777216")
 endif()
 
-# A build with none of the game-specific overrides (see the top of stubs.cpp).
-option(SAINTSROW_BARE "Build without the game-specific stub overrides" OFF)
-if(SAINTSROW_BARE)
+# The game-specific overrides in stubs.cpp (forced state, a StreamCallback
+# pump, ring-buffer surgery, a VEH that skips faulting instructions) date from
+# the 0.7-era runtime. Without them the game gets further, so they are off by
+# default and kept only for comparison. See docs/progress-log.md (2026-10-20).
+option(SAINTSROW_LEGACY_STUBS "Build with the old game-specific stub overrides" OFF)
+if(NOT SAINTSROW_LEGACY_STUBS)
     target_compile_definitions(saintsrow PRIVATE SR_BARE)
 endif()

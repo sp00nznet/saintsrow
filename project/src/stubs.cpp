@@ -24,8 +24,9 @@
 #include <atomic>
 #include <cstring>
 
-// SAINTSROW_BARE drops every game-specific override below, leaving the plain
-// runtime plus the scripted controller, to test which hacks are still needed.
+// SR_BARE (the default; SAINTSROW_LEGACY_STUBS=ON turns it off) drops every
+// game-specific override below, leaving the plain
+// runtime plus the scripted controller. Kept for comparison only.
 #ifndef SR_BARE
 
 // Worker thread semaphore handles captured from sub_826368E0
