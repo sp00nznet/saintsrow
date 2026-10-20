@@ -7,9 +7,9 @@ documentation.
 
 - Build with the default options (no `SAINTSROW_LEGACY_STUBS`) and check that the game still
   reaches Player Creation with `SR_AUTOPLAY=1`. Say in the PR how far it got before and after.
-- Keep game-specific code in this repo and general runtime fixes in ReXGlue. A change to the SDK
-  goes in `docs/sdk-patches/` here *and* should be offered upstream to
-  [rexglue-sdk](https://github.com/rexglue/rexglue-sdk).
+- Keep game-specific code in this repo. Runtime fixes go to our fork,
+  [sp00nznet/rexglue-sdk](https://github.com/sp00nznet/rexglue-sdk) (branch `saintsrow`). Please
+  don't open AI-assisted PRs against upstream ReXGlue; its maintainers have asked not to get them.
 - A manifest entry needs a reason in the comment above its group: how it was found, and why it is
   a function (who calls it).
 
@@ -21,8 +21,8 @@ documentation.
 
 ## Where your code comes from
 
-Everything here is MIT, so contributions must be your own work or MIT-compatible, with any
-third-party notice kept and listed in `NOTICE`.
+Everything here is MIT, so contributions must be your own work or MIT-compatible,
+with any third-party licence notice kept.
 
 Don't port code from copyleft or unlicensed projects, even rewritten. The ones most likely to be
 open next to a 360 recomp are **xemu, Cxbx-Reloaded, RPCS3, Dolphin and QEMU** (GPL/LGPL), and

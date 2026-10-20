@@ -12,8 +12,9 @@
 - **Finish the manifest.** Keep adding vtable-only functions the scanner misses, as the
   "Call to invalid or unregistered function" log reports them, then revert the SDK patch that
   makes that error non-fatal.
-- **Upstream the SDK patches** to rexglue-sdk (empty indirect buffers, the heap reset, dispatch
-  header re-attach), or drop the ones upstream no longer needs.
+- **Keep the SDK fork small.** Rebase `sp00nznet/rexglue-sdk` onto new upstream `development` and
+  drop any fix upstream makes unnecessary. The fixes aren't sent upstream, because ReXGlue doesn't
+  accept AI-written PRs.
 
 ## House-style gaps (repo rules, section 10)
 

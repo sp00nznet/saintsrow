@@ -10,8 +10,8 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Log = Join-Path $Root 'setup.log'
 $Sdk = Join-Path $Root 'tools\rexglue-sdk'
 $SdkInstall = Join-Path $Sdk 'out\install\win-amd64'
-$SdkCommit = 'bd833a2ab69d305f99ddf57418fc38ffec8af93d'   # rexglue development, 2026-10-02
-$Patch = Join-Path $Root 'docs\sdk-patches\rexglue-development-saintsrow.patch'
+# sp00nznet/rexglue-sdk, branch saintsrow: upstream development@bd833a2 + this project's fixes
+$SdkCommit = 'abc7ced'
 $Game = Join-Path $Root 'extracted'
 $Llvm = 'C:\Program Files\LLVM\bin'
 
@@ -81,9 +81,8 @@ Write-Host "   $Game"
 Step 'ReXGlue SDK (first build takes 10-20 minutes)'
 if (-not (Test-Path (Join-Path $SdkInstall 'bin\rexglue.exe'))) {
     if (-not (Test-Path $Sdk)) {
-        Run 'Cloning rexglue-sdk' { git clone https://github.com/rexglue/rexglue-sdk $Sdk }
-        Run 'Checking out the pinned SDK' { git -C $Sdk checkout -b saintsrow/patches $SdkCommit }
-        Run 'Applying the Saints Row SDK patches' { git -C $Sdk -c user.name=setup -c user.email=setup@localhost am $Patch }
+        Run 'Cloning the ReXGlue SDK fork' { git clone -b saintsrow https://github.com/sp00nznet/rexglue-sdk $Sdk }
+        Run 'Checking out the pinned SDK' { git -C $Sdk checkout $SdkCommit }
     }
     Run 'Fetching SDK submodules' { git -C $Sdk submodule update --init --recursive }
     Push-Location $Sdk

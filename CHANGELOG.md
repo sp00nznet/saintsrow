@@ -13,13 +13,14 @@ All notable changes to this project. The format follows
 - `Setup.cmd` / `tools/setup.ps1`: one-shot setup that checks prerequisites, extracts the disc,
   builds the SDK and the game, and leaves `Play.cmd`.
 - `saintsrow_crash.log`: the faulting stack of a fatal crash, as module+offset.
-- `CHANGELOG.md`, `ROADMAP.md`, `CONTRIBUTING.md`, `NOTICE`, `docs/architecture.md`.
+- `CHANGELOG.md`, `ROADMAP.md`, `CONTRIBUTING.md`, `docs/architecture.md`.
 - Six vtable-only `li r4,N; b` stubs at `0x8221EC08..` to the manifest (Player Creation calls them).
 
 ### Changed
 
-- Rebased onto ReXGlue `development` (`bd833a2`, 0.10.0.28-dev). The four SDK patches now live
-  in `docs/sdk-patches/rexglue-development-saintsrow.patch`.
+- Rebased onto ReXGlue `development` (`bd833a2`, 0.10.0.28-dev). The four SDK fixes live in a
+  fork, [sp00nznet/rexglue-sdk](https://github.com/sp00nznet/rexglue-sdk) branch `saintsrow`,
+  instead of a patch file. ReXGlue doesn't take AI-written PRs, so they aren't sent upstream.
 - The 0.7-era game overrides in `stubs.cpp` and the null-page exception handler are off by
   default (`SAINTSROW_LEGACY_STUBS=OFF`). Without them the game renders correctly and reaches
   Player Creation; with them it stalled on the cathedral loading screen.

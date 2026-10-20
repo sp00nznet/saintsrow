@@ -21,11 +21,11 @@ Three parts, two of them built from source on your machine:
 
 ## What each part owns
 
-**ReXGlue SDK** (`tools/rexglue-sdk`, cloned and patched by setup). The recompiler (`rexglue
+**ReXGlue SDK** (`tools/rexglue-sdk`, cloned by setup from [our fork](https://github.com/sp00nznet/rexglue-sdk)). The recompiler (`rexglue
 codegen`) and the runtime: an Xbox 360 kernel and XAM implementation, the Xenos GPU emulated on
 D3D12 (a plugin, `rexgpu-xenos.dll`), XMA audio, and SDL input and windowing. Its `ReXApp` class
-does the whole startup sequence; a game overrides a few hooks. This project's changes to it are
-in `docs/sdk-patches/` (see the README there for why each exists).
+does the whole startup sequence; a game overrides a few hooks. The fork adds four fixes
+to upstream `development`; its README lists them and why each exists.
 
 **The manifest** (`project/saintsrow_manifest.toml`). Where the XEX is and where generated code
 goes, plus functions codegen's scanner can't find on its own. Those are almost all reached only

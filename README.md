@@ -78,14 +78,15 @@ python -I tools\360tools\tools\extract_iso.py "D:\path\to\Saints Row.iso" extrac
 
 It ends with `Extracted 375 files to extracted/`. `extracted\default.xex` must exist.
 
-**2. ReXGlue SDK**, pinned to the `development` commit this was tested with, plus this project's
-SDK patches ([docs/sdk-patches/](docs/sdk-patches/)):
+**2. ReXGlue SDK**, from [our fork](https://github.com/sp00nznet/rexglue-sdk): upstream `development`
+at `bd833a2` plus four fixes this game needs. They live in a fork rather than going upstream
+because they were written with an AI assistant and ReXGlue doesn't take AI-written PRs. The fork's
+README lists exactly what it changes.
 
 ```
-git clone https://github.com/rexglue/rexglue-sdk tools\rexglue-sdk
+git clone -b saintsrow https://github.com/sp00nznet/rexglue-sdk tools\rexglue-sdk
 cd tools\rexglue-sdk
-git checkout -b saintsrow/patches bd833a2ab69d305f99ddf57418fc38ffec8af93d
-git am ..\..\docs\sdk-patches\rexglue-development-saintsrow.patch
+git checkout abc7ced
 git submodule update --init --recursive
 cmake --preset win-amd64 "-DCMAKE_RC_COMPILER=C:/Program Files/LLVM/bin/llvm-rc.exe"
 cmake --build out/build/win-amd64 --config Release
@@ -163,8 +164,7 @@ The pieces and how they fit are in [docs/architecture.md](docs/architecture.md).
 ## License
 
 The code in this repository (tools, build files, runtime glue and documentation) is MIT; see
-[LICENSE](LICENSE). The SDK patches in `docs/sdk-patches/` modify ReXGlue, which is BSD-3-Clause;
-see [NOTICE](NOTICE).
+[LICENSE](LICENSE). ReXGlue, which setup clones separately, is BSD-3-Clause.
 
 The MIT licence does not and cannot cover Saints Row itself. The game's code, art, audio and data
 belong to their rights holders, are not distributed here, and you need your own copy to use any of
@@ -175,4 +175,5 @@ for the same reason. It is made from your own copy and is never tracked in this 
 
 - [360tools](https://github.com/sp00nznet/360tools) — extraction and triage tools for Xbox 360 recomps
 - [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) — the recompiler and runtime this is built on
+  ([our fork](https://github.com/sp00nznet/rexglue-sdk) is what the build uses)
 - [StilwaterReclaimed](https://github.com/THE-W0RLD/StilwaterReclaimed) — Saints Row 2 static recompilation
