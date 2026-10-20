@@ -2620,9 +2620,11 @@ REX_EXTERN(sub_8260C5F8) {
 #endif  // SR_BARE
 
 // Scripted controller for unattended runs. SR_AUTOPLAY=1 presses a button for
-// 200 ms every 4 s (after the first 10 s), alternating A and Y, on top of
-// whatever the real pad reports. Y is "Begin Game" on Player Creation; A walks
-// everything before it. (START only pauses there.)
+// 200 ms every 4 s (after the first 10 s), cycling A, Y, START, on top of
+// whatever the real pad reports. A walks the menus, Y is "Begin Game" on Player
+// Creation, START dismisses the in-game tutorial popups. SR_AUTOPLAY_WALK=<s>
+// stops the buttons after that many seconds and walks forward instead, with
+// the camera panning (for recordings).
 // That walks attract mode, the main menu and the New Game prompts without the
 // window having focus, which the SDK requires before it reports real input --
 // so a test run on a second monitor never has to take the keyboard.
@@ -2652,8 +2654,21 @@ REX_EXTERN(__imp__XamInputGetState) {
         static std::atomic<uint32_t> packet{1};
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();
         if (result != 0) std::memset(state, 0, sizeof(*state));
-        if (ms > 10000 && ms % 4000 < 200) {
-            uint16_t button = (ms / 4000) % 2 ? 0x8000 /*Y*/ : 0x1000 /*A*/;
+        static const long long walk_ms = [] {
+            const char* v = std::getenv("SR_AUTOPLAY_WALK");
+            return v ? std::atoll(v) * 1000 : -1;
+        }();
+        if (walk_ms >= 0 && ms > walk_ms) {
+            // Walk: left stick mostly forward, camera panning slowly back and forth.
+            state->gamepad.thumb_ly = int16_t(26000);
+            state->gamepad.thumb_rx = int16_t(9000 * std::sin(double(ms - walk_ms) / 3000.0));
+            // The START taps before this may have left the pause menu open; B is
+            // its Resume.
+            if ((ms - walk_ms) % 6000 < 200)
+                state->gamepad.buttons = uint16_t(state->gamepad.buttons) | 0x2000;  // B
+        } else if (ms > 10000 && ms % 4000 < 200) {
+            static const uint16_t kCycle[3] = {0x1000 /*A*/, 0x8000 /*Y*/, 0x0010 /*START*/};
+            uint16_t button = kCycle[(ms / 4000) % 3];
             state->gamepad.buttons = uint16_t(state->gamepad.buttons) | button;
         }
         // The game only acts on a new packet number, so tick it every call.

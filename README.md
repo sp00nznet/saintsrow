@@ -4,20 +4,23 @@ Saints Row's Xbox 360 executable, recompiled from PowerPC to native x86-64 C++ w
 [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk), so it runs on Windows without an emulator.
 Saints Row (2006) never had a PC release.
 
+![Walking the streets of Stilwater in the recompiled build](docs/screenshots/hero.gif)
+
 ## Status
 
-**Alpha, no release yet.** It boots through the logos, attract mode and the main menu, and New Game
-reaches Player Creation, all with correct graphics, audio and controller input. Getting from
-Player Creation into the city is the current work.
+**Alpha, no release yet.** It boots through the logos, attract mode and the menu, and New Game goes
+through Player Creation into Stilwater, where you can walk around, all with correct graphics,
+audio and controller input. The first mission and the rest of gameplay are the current work.
 
 | Stage | State |
 | --- | --- |
 | Boot, THQ/Volition logos, legal screen | works |
 | Attract mode (city fly-by), main menu | works |
 | New Game → cathedral loading screen → Player Creation | works |
-| Begin Game → into the city | in progress |
+| Begin Game → opening load (~2½ min) → the city | works |
+| On foot: walking, camera, HUD, minimap, pause map | works |
+| First mission, combat, vehicles | not tested yet |
 | Load Game | not tested since the 2026-10-20 rebuild |
-| Gameplay | not reached |
 
 Known issues and what's next are in [ROADMAP.md](ROADMAP.md); the investigation history is in
 [docs/progress-log.md](docs/progress-log.md).
@@ -32,6 +35,7 @@ Recorded from the recompiled build, 2026-10-20.
 ![Main menu over attract mode](docs/screenshots/main-menu.png)
 ![Cathedral loading screen](docs/screenshots/loading.png)
 ![Player Creation](docs/screenshots/player-creation.png)
+![On foot outside the church](docs/screenshots/in-game.png)
 
 ## Getting Started
 
@@ -137,10 +141,10 @@ Play.cmd --log_flush_interval=1           # flush logs/saintsrow_NNN.log every s
 Controls: a controller works directly. Keyboard: Enter = Start, Space = A, Tab = Back, WASD = left
 stick. The game only reads input while its window has focus.
 
-`SR_AUTOPLAY=1` adds a scripted controller that taps a button every 4 seconds, alternating A and
-Y. It
-walks the menus and New Game into Player Creation with nobody at the keyboard, and is how test runs
-are made:
+`SR_AUTOPLAY=1` adds a scripted controller that taps a button every 4 seconds, cycling A, Y and
+START. It walks the menus, Player Creation and the first tutorial popup with nobody at the
+keyboard, and is how test runs are made. `SR_AUTOPLAY_WALK=<seconds>` stops the taps after that
+long and walks forward with the camera panning (the GIF above is one of these):
 
 ```
 set SR_AUTOPLAY=1

@@ -8,8 +8,11 @@ All notable changes to this project. The format follows
 
 ### Added
 
-- `SR_AUTOPLAY=1`: a scripted controller (A and Y, alternating every 4 s) layered on the SDK's
-  real input, so test runs need nobody at the keyboard.
+- `SR_AUTOPLAY=1`: a scripted controller (A, Y, START, one tap every 4 s) layered on the SDK's
+  real input, so test runs need nobody at the keyboard. `SR_AUTOPLAY_WALK=<s>` then walks around
+  for recordings.
+- The game reaches Stilwater: New Game → Player Creation → the opening load → on foot outside the
+  church, with HUD, minimap and pause map. Hero GIF and in-game screenshot in the README.
 - `Setup.cmd` / `tools/setup.ps1`: one-shot setup that checks prerequisites, extracts the disc,
   builds the SDK and the game, and leaves `Play.cmd`.
 - `saintsrow_crash.log`: the faulting stack of a fatal crash, as module+offset.

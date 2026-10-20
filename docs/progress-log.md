@@ -4,6 +4,16 @@ Dated investigation notes, newest first, moved out of the README on 2026-10-20. 
 was tried, what was measured, and what it ruled in or out. Addresses are guest virtual addresses in
 the retail `default.xex` image.
 
+## In the city (2026-10-20, later)
+
+With Y added to the autoplay cycle, Begin Game works: a "leave Player Creation?" prompt, then the
+"3rd Street Saints – The Streets of Stilwater" title card. That card stays up for about two and a
+half minutes. Stack dumps taken during it showed every thread waiting: the main loop, ten job
+workers, one IO worker (one, not the 201 duplicates of September) and two loader threads. It
+looked like a stall but was the opening load. The player then appears outside the church with the
+HUD up (minimap, health), behind the first tutorial popup, "Press START to continue". START joined
+the autoplay cycle for that, and `SR_AUTOPLAY_WALK=<s>` was added to walk around for recordings.
+
 ## The hacks were the stall (2026-10-20)
 
 Rebased onto ReXGlue `development` (`bd833a2`). The game built and ran exactly as before: menu,

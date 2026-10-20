@@ -2,8 +2,11 @@
 
 ## Next
 
-- **Begin Game → the city.** Player Creation renders and takes input. The next step is pressing
-  Begin Game and following the load into Stilwater.
+- **The first mission.** The player is in Stilwater on foot. Next: follow the opening mission
+  marker, then combat and vehicles.
+- **The opening load takes about 2½ minutes**, on a title card with every thread waiting most of
+  the time. Find out whether the load is IO-bound or waiting on a timer, and compare with
+  hardware.
 - **The intermittent startup crash.** One of the first three bare-build runs segfaulted about 3 s after the
   guest started, before the logos. `saintsrow_crash.log` now captures the stack; it needs a repro.
 - **Retire `stubs.cpp`'s legacy overrides.** They are compiled out by default
