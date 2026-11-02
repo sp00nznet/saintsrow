@@ -11,7 +11,7 @@
   },
   "sources": [],
   "setup": {
-    "windows": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "tools\setup.ps1", "-Yes", "-Game", "{game}"]
+    "windows": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "tools\\setup.ps1", "-Yes", "-Game", "{game}"]
   },
   "play": "Play.cmd"
 }
