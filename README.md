@@ -8,9 +8,10 @@ Saints Row (2006) never had a PC release.
 
 ## Status
 
-**Alpha, no release yet.** It boots through the logos, attract mode and the menu, and New Game goes
-through Player Creation into Stilwater, where you can walk around, all with correct graphics,
-audio and controller input. The first mission and the rest of gameplay are the current work.
+**v0.1.0.** It boots through the logos, attract mode and the menu, and New Game goes through
+Player Creation into Stilwater, where you can walk around, all with correct graphics, audio and
+controller input. Past that, nobody has tested it yet: **playtesters wanted** (see
+[Known issues](#known-issues) and [Reporting a problem](#reporting-a-problem)).
 
 | Stage | State |
 | --- | --- |
@@ -22,8 +23,18 @@ audio and controller input. The first mission and the rest of gameplay are the c
 | First mission, combat, vehicles | not tested yet |
 | Load Game | not tested since the 2026-10-20 rebuild |
 
-Known issues and what's next are in [ROADMAP.md](ROADMAP.md); the investigation history is in
+What's next is in [ROADMAP.md](ROADMAP.md); the investigation history is in
 [docs/progress-log.md](docs/progress-log.md).
+
+### Known issues
+
+- **HUD flicker on foot.** The weapon radial (top right) pops up on its own now and then, and the
+  minimap's green objective marker (bottom left) blinks faster than it should. Not tracked down
+  yet. If you see it, a short clip and your `project\build\logs\saintsrow_NNN.log` help a lot.
+- **Slow, uneven loading.** The opening load after Player Creation takes about 2½ minutes on the
+  test machine and has sometimes not finished at all. If it sits on the "Streets of Stilwater"
+  screen for more than 10 minutes, please report it.
+- **Slow startup.** The window can take a minute or more to appear (see the trip-ups below).
 
 This repository holds no game code or data. The C++ is generated on your machine from your own copy
 of the game and is never committed (see [License](#license)).
@@ -44,13 +55,22 @@ extracted to a folder that contains `default.xex`.
 
 ### Quick start
 
+**Installer:** download `SaintsRow-Installer-windows-x64.exe` from the
+[latest release](https://github.com/sp00nznet/saintsrow/releases), run it, and point it at the
+folder holding your `.iso` (or the extracted game). It does everything below and gives you a
+**Play** button. Windows SmartScreen will ask first (**More info**, **Run anyway**): the installer
+isn't signed. The first build takes 30 to 60 minutes.
+
+**Or from a download of this repository:**
+
 1. Download this repository (green **Code** button → **Download ZIP**) and unzip it somewhere with
    about 20 GB free.
 2. Double-click **`Setup.cmd`**.
    - It checks for Git, CMake, Ninja, LLVM/Clang, Python and the Visual Studio C++ Build Tools, and
      asks before installing anything that's missing (through `winget`).
    - It asks for the path to your `.iso` or extracted folder.
-   - It then builds the ReXGlue SDK (10–20 minutes the first time) and the game (about 5 minutes).
+   - It then builds the ReXGlue SDK (10–20 minutes the first time), recompiles the game to C++,
+     and builds it (10–20 minutes).
 3. When it prints `Done.`, double-click **`Play.cmd`**.
 
 If it stops, it says what to do in one line and writes the details to `setup.log`. Running it again
@@ -83,14 +103,14 @@ python -I tools\360tools\tools\extract_iso.py "D:\path\to\Saints Row.iso" extrac
 It ends with `Extracted 375 files to extracted/`. `extracted\default.xex` must exist.
 
 **2. ReXGlue SDK**, from [our fork](https://github.com/sp00nznet/rexglue-sdk): upstream `development`
-at `bd833a2` plus four fixes this game needs. They live in a fork rather than going upstream
+at `bd833a2` plus the fixes this game needs. They live in a fork rather than going upstream
 because they were written with an AI assistant and ReXGlue doesn't take AI-written PRs. The fork's
 README lists exactly what it changes.
 
 ```
 git clone -b saintsrow https://github.com/sp00nznet/rexglue-sdk tools\rexglue-sdk
 cd tools\rexglue-sdk
-git checkout abc7ced
+git checkout d50d599
 git submodule update --init --recursive
 cmake --preset win-amd64 "-DCMAKE_RC_COMPILER=C:/Program Files/LLVM/bin/llvm-rc.exe"
 cmake --build out/build/win-amd64 --config Release
@@ -100,10 +120,12 @@ cd ..\..
 
 The install ends with `-- Registered rexglue in CMake user package registry`.
 
-**3. The game.** Configuring runs codegen (PowerPC → C++, into the git-ignored `generated\`):
+**3. Codegen and the game.** Codegen recompiles `default.xex` to C++ in the git-ignored
+`generated\`:
 
 ```
 cd project
+..\tools\rexglue-sdk\out\install\win-amd64\bin\rexglue.exe codegen saintsrow_manifest.toml
 cmake --preset win-amd64
 cmake --build build
 ```
@@ -154,12 +176,21 @@ project\build\saintsrow.exe --game_data_root=extracted --monitor=2 --log_flush_i
 Logs go to `project\build\logs\`. A crash writes the faulting stack to
 `project\build\saintsrow_crash.log`.
 
+## Reporting a problem
+
+Open an [issue](https://github.com/sp00nznet/saintsrow/issues) with what you did, what happened,
+your GPU and Windows version, and the newest `project\build\logs\saintsrow_NNN.log` (plus
+`project\build\saintsrow_crash.log` if the game crashed). A screenshot or short clip is the
+fastest way to show a graphics problem. Reports from past the opening walk (the first mission,
+cars, combat, saving) are the most useful right now.
+
 ## Building from source
 
 The pieces and how they fit are in [docs/architecture.md](docs/architecture.md). In short:
 
 - `project/saintsrow_manifest.toml` tells ReXGlue's codegen where the game's code is and lists the
-  functions its scanner misses. Codegen runs as a build step.
+  functions its scanner misses. Setup runs it once; after that the build reruns it
+  when the manifest changes.
 - `project/src/main.cpp` is the app (window, paths, crash report); `project/src/stubs.cpp` holds
   overrides of game or kernel functions.
 - `-DSAINTSROW_LEGACY_STUBS=ON` turns the 0.7-era game overrides back on for comparison. They are

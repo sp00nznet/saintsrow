@@ -2,12 +2,20 @@
 
 All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/). Nothing has been released yet.
+[Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-02
+
+First release: the game reaches Stilwater on foot. Playtesters wanted; see the README's known
+issues.
+
 ### Added
 
+- `SaintsRow-Installer-windows-x64.exe`, built by
+  [recomp-launcher](https://github.com/sp00nznet/recomp-launcher) from `launcher/launcher.json`:
+  point it at your disc image and it builds the game on your machine. It carries no game code.
 - `SR_AUTOPLAY=1`: a scripted controller (A, Y, START, one tap every 4 s) layered on the SDK's
   real input, so test runs need nobody at the keyboard. `SR_AUTOPLAY_WALK=<s>` then walks around
   for recordings.
@@ -21,6 +29,9 @@ All notable changes to this project. The format follows
 
 ### Changed
 
+- Setup runs codegen itself (a clean clone could not configure without it), takes `-Yes` and
+  `-Game <path>` for the installer, and prints `[n/6]` progress lines.
+- SDK fork pinned at `d50d599`, which also fixes Windows clones failing on libmspack's symlinks.
 - Rebased onto ReXGlue `development` (`bd833a2`, 0.10.0.28-dev). The four SDK fixes live in a
   fork, [sp00nznet/rexglue-sdk](https://github.com/sp00nznet/rexglue-sdk) branch `saintsrow`,
   instead of a patch file. ReXGlue doesn't take AI-written PRs, so they aren't sent upstream.
