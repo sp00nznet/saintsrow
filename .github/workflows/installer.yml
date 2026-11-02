@@ -1,0 +1,13 @@
+# The recomp-launcher installer for this game, built from launcher/launcher.json.
+# Every push to main leaves it as an artifact; a v* tag attaches it to that
+# tag's release. The installer carries no game code: it builds on the player's
+# machine from their own copy.
+name: installer
+on:
+  push: { branches: [main], tags: ["v*"] }
+  workflow_dispatch:
+permissions: { contents: write }
+jobs:
+  installer:
+    uses: sp00nznet/recomp-launcher/.github/workflows/installer.yml@main
+    with: { name: SaintsRow-Installer, platforms: windows }

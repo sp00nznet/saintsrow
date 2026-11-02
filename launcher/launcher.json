@@ -1,0 +1,17 @@
+{
+  "title": "Saints Row",
+  "repo": "sp00nznet/saintsrow",
+  "accent": "#8e3fd1",
+  "note": {
+    "windows": "The first build takes 30 to 60 minutes and about 15 GB. Git, CMake, Ninja, LLVM, Python and the Visual Studio Build Tools (about 3 GB) are installed if they are missing; Windows asks for permission once. Choose your Saints Row disc image (.iso), or a folder holding it or the extracted game with default.xex."
+  },
+  "game": {
+    "name": "Saints Row",
+    "files": ["default.xex|*.iso"]
+  },
+  "sources": [],
+  "setup": {
+    "windows": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "tools\setup.ps1", "-Yes", "-Game", "{game}"]
+  },
+  "play": "Play.cmd"
+}
